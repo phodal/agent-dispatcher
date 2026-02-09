@@ -25,6 +25,7 @@ data class AcpAgentPreset(
         env = emptyMap(),
         description = name,
         autoApprove = false,
+        nonStandardApi = nonStandardApi,
     )
 }
 

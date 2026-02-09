@@ -2,6 +2,7 @@ package com.github.phodal.acpmanager.acp
 
 import com.agentclientprotocol.common.Event
 import com.agentclientprotocol.model.*
+import com.github.phodal.acpmanager.claudecode.ClaudeCodeClient
 import com.github.phodal.acpmanager.config.AcpAgentConfig
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.github.phodal.acpmanager.ui.renderer.PlanEntry
@@ -63,8 +64,11 @@ class AgentSession(
     private val scope: CoroutineScope,
 ) : Disposable {
     private var client: AcpClient? = null
+    private var claudeClient: ClaudeCodeClient? = null
+    private var claudeEventJob: Job? = null
     private var managedProcess: ManagedProcess? = null
     private var stderrJob: Job? = null
+    private var isClaudeCodeMode = false
 
     private val _state = MutableStateFlow(AgentSessionState(agentKey))
     val state: StateFlow<AgentSessionState> = _state.asStateFlow()
@@ -87,7 +91,13 @@ class AgentSession(
     @Volatile
     private var isConnecting = false
 
-    val isConnected: Boolean get() = client?.isConnected == true && managedProcess?.isAlive() == true
+    val isConnected: Boolean get() {
+        return if (isClaudeCodeMode) {
+            claudeClient?.isConnected == true
+        } else {
+            client?.isConnected == true && managedProcess?.isAlive() == true
+        }
+    }
 
     /**
      * Connect to the ACP agent.
@@ -113,42 +123,13 @@ class AgentSession(
             updateState { copy(error = null) }
 
             val cwd = project.basePath ?: System.getProperty("user.dir") ?: "."
-            val processManager = AcpProcessManager.getInstance()
-            val managed = processManager.getOrCreateProcess(agentKey, config, cwd)
-            this.managedProcess = managed
 
-            // Start stderr reading
-            stderrJob = scope.launch(Dispatchers.IO) {
-                try {
-                    managed.errorStream.bufferedReader().use { reader ->
-                        reader.lineSequence().forEach { line ->
-                            log.info("[$agentKey stderr] $line")
-                        }
-                    }
-                } catch (e: Exception) {
-                    log.warn("[$agentKey] stderr reading failed: ${e.message}")
-                }
+            // Check if this is Claude Code (non-standard API)
+            if (config.isClaudeCode()) {
+                connectClaudeCode(config, cwd)
+            } else {
+                connectStandardAcp(config, cwd)
             }
-
-            log.info("Creating AcpClient for '$agentKey', process alive=${managed.isAlive()}")
-
-            val acpClient = AcpClient(
-                coroutineScope = scope,
-                input = managed.inputStream.asSource(),
-                output = managed.outputStream.asSink(),
-                cwd = cwd,
-                agentName = agentKey,
-            )
-
-            // Set up permission handler
-            acpClient.onPermissionRequest = { toolCall, options ->
-                handlePermissionRequest(toolCall, options, config)
-            }
-
-            log.info("Calling acpClient.connect() for '$agentKey'...")
-            acpClient.connect()
-            log.info("acpClient.connect() completed for '$agentKey'")
-            this.client = acpClient
 
             updateState { copy(isConnected = true, error = null) }
             emitRenderEvent(RenderEvent.Connected(agentKey))
@@ -167,10 +148,112 @@ class AgentSession(
     }
 
     /**
+     * Connect using Claude Code's stream-json protocol.
+     */
+    private fun connectClaudeCode(config: AcpAgentConfig, cwd: String) {
+        log.info("Connecting to Claude Code for '$agentKey' using stream-json mode")
+        isClaudeCodeMode = true
+
+        val claudeCodeClient = ClaudeCodeClient(
+            scope = scope,
+            binaryPath = config.command,
+            workingDirectory = cwd,
+            additionalArgs = config.args,
+            envVars = config.env,
+            permissionMode = if (config.autoApprove) "bypassPermissions" else "acceptEdits"
+        )
+
+        // Forward Claude Code events to our render events flow
+        claudeEventJob = scope.launch {
+            claudeCodeClient.renderEvents.collect { event ->
+                emitRenderEvent(event)
+                // Also add to messages for state tracking
+                when (event) {
+                    is RenderEvent.UserMessage -> addMessage(ChatMessage(MessageRole.USER, event.content))
+                    is RenderEvent.MessageEnd -> addMessage(ChatMessage(MessageRole.ASSISTANT, event.fullContent))
+                    is RenderEvent.ThinkingEnd -> addMessage(ChatMessage(MessageRole.THINKING, event.fullContent, isThinking = true))
+                    is RenderEvent.ToolCallStart -> addMessage(ChatMessage(
+                        role = MessageRole.TOOL_CALL,
+                        content = event.title ?: event.toolName,
+                        toolCallId = event.toolCallId,
+                        toolCallKind = event.kind
+                    ))
+                    is RenderEvent.ToolCallEnd -> addMessage(ChatMessage(
+                        role = MessageRole.TOOL_RESULT,
+                        content = "${event.title ?: ""}: ${event.output ?: "Done"}",
+                        toolCallId = event.toolCallId,
+                        toolCallStatus = event.status
+                    ))
+                    is RenderEvent.Error -> addMessage(ChatMessage(MessageRole.ERROR, event.message))
+                    is RenderEvent.Info -> addMessage(ChatMessage(MessageRole.INFO, event.message))
+                    else -> { /* Other events don't need message tracking */ }
+                }
+            }
+        }
+
+        claudeCodeClient.start()
+        this.claudeClient = claudeCodeClient
+
+        log.info("Claude Code client started for '$agentKey'")
+    }
+
+    /**
+     * Connect using standard ACP protocol.
+     */
+    private suspend fun connectStandardAcp(config: AcpAgentConfig, cwd: String) {
+        log.info("Connecting to standard ACP agent for '$agentKey'")
+        isClaudeCodeMode = false
+
+        val processManager = AcpProcessManager.getInstance()
+        val managed = processManager.getOrCreateProcess(agentKey, config, cwd)
+        this.managedProcess = managed
+
+        // Start stderr reading
+        stderrJob = scope.launch(Dispatchers.IO) {
+            try {
+                managed.errorStream.bufferedReader().use { reader ->
+                    reader.lineSequence().forEach { line ->
+                        log.info("[$agentKey stderr] $line")
+                    }
+                }
+            } catch (e: Exception) {
+                log.warn("[$agentKey] stderr reading failed: ${e.message}")
+            }
+        }
+
+        log.info("Creating AcpClient for '$agentKey', process alive=${managed.isAlive()}")
+
+        val acpClient = AcpClient(
+            coroutineScope = scope,
+            input = managed.inputStream.asSource(),
+            output = managed.outputStream.asSink(),
+            cwd = cwd,
+            agentName = agentKey,
+        )
+
+        // Set up permission handler
+        acpClient.onPermissionRequest = { toolCall, options ->
+            handlePermissionRequest(toolCall, options, config)
+        }
+
+        log.info("Calling acpClient.connect() for '$agentKey'...")
+        acpClient.connect()
+        log.info("acpClient.connect() completed for '$agentKey'")
+        this.client = acpClient
+    }
+
+    /**
      * Send a prompt message and stream responses.
      */
     suspend fun sendMessage(text: String) {
         log.info("sendMessage called for '$agentKey' with text: ${text.take(50)}...")
+
+        // Use Claude Code client if in Claude mode
+        if (isClaudeCodeMode) {
+            sendMessageClaudeCode(text)
+            return
+        }
+
         val acpClient = client ?: throw IllegalStateException("Not connected")
 
         // Emit user message event
@@ -257,6 +340,27 @@ class AgentSession(
 
             emitRenderEvent(RenderEvent.Error("Error: ${e.message}"))
             addMessage(ChatMessage(MessageRole.ERROR, "Error: ${e.message}"))
+            updateState { copy(isProcessing = false, currentStreamingText = "", currentThinkingText = "") }
+        }
+    }
+
+    /**
+     * Send a prompt using Claude Code's stream-json protocol.
+     */
+    private suspend fun sendMessageClaudeCode(text: String) {
+        val claudeCodeClient = claudeClient ?: throw IllegalStateException("Claude Code client not connected")
+
+        updateState { copy(isProcessing = true, currentStreamingText = "", currentThinkingText = "") }
+
+        try {
+            log.info("Sending prompt to Claude Code for '$agentKey'...")
+            claudeCodeClient.sendPrompt(text)
+            log.info("Claude Code prompt completed for '$agentKey'")
+        } catch (e: Exception) {
+            log.warn("Claude Code prompt failed for '$agentKey': ${e.message}", e)
+            emitRenderEvent(RenderEvent.Error("Error: ${e.message}"))
+            addMessage(ChatMessage(MessageRole.ERROR, "Error: ${e.message}"))
+        } finally {
             updateState { copy(isProcessing = false, currentStreamingText = "", currentThinkingText = "") }
         }
     }
@@ -495,11 +599,20 @@ class AgentSession(
         try {
             stderrJob?.cancel()
             stderrJob = null
-            client?.disconnect()
+            claudeEventJob?.cancel()
+            claudeEventJob = null
+
+            if (isClaudeCodeMode) {
+                claudeClient?.stop()
+                claudeClient = null
+            } else {
+                client?.disconnect()
+                client = null
+            }
         } catch (_: Exception) {
         }
-        client = null
         managedProcess = null
+        isClaudeCodeMode = false
         emitRenderEvent(RenderEvent.Disconnected(agentKey))
         updateState { copy(isConnected = false, isProcessing = false) }
     }
