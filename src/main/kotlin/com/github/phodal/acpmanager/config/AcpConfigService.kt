@@ -10,7 +10,11 @@ import java.io.File
 /**
  * Service that manages ACP agent configurations.
  *
- * Reads from ~/.acp-manager/config.yaml and supports per-project overrides.
+ * Supports two configuration sources (in priority order):
+ * 1. ~/.acp-manager/config.yaml (ACP Manager specific)
+ * 2. ~/.autodev/config.yaml (AutoDev/Xiuper shared config)
+ *
+ * The service will automatically detect agents from both sources and merge them.
  */
 @Service(Service.Level.PROJECT)
 class AcpConfigService(private val project: Project) {
@@ -20,59 +24,97 @@ class AcpConfigService(private val project: Project) {
     private var lastModified: Long = 0
 
     /**
-     * Get the global config directory.
+     * Get the ACP Manager config directory.
      */
-    private fun getGlobalConfigDir(): File {
+    private fun getAcpManagerConfigDir(): File {
         return File(System.getProperty("user.home"), ".acp-manager").also {
             if (!it.exists()) it.mkdirs()
         }
     }
 
     /**
-     * Get the global config file path.
+     * Get the AutoDev config directory.
      */
-    fun getGlobalConfigFile(): File {
-        return File(getGlobalConfigDir(), "config.yaml")
+    private fun getAutoDevConfigDir(): File {
+        return File(System.getProperty("user.home"), ".autodev")
     }
 
     /**
-     * Load the configuration, merging global and project-level configs.
+     * Get the ACP Manager config file path.
+     */
+    fun getGlobalConfigFile(): File {
+        return File(getAcpManagerConfigDir(), "config.yaml")
+    }
+
+    /**
+     * Get the AutoDev config file path.
+     */
+    private fun getAutoDevConfigFile(): File {
+        return File(getAutoDevConfigDir(), "config.yaml")
+    }
+
+    /**
+     * Load the configuration, merging from AutoDev config, ACP Manager config, and detected presets.
+     * 
+     * Priority: ACP Manager > AutoDev > Presets (only for missing agents)
      */
     fun loadConfig(): AcpManagerConfig {
-        val globalFile = getGlobalConfigFile()
-        if (!globalFile.exists()) {
-            // Create default config
-            createDefaultConfig(globalFile)
-        }
+        val acpManagerFile = getGlobalConfigFile()
+        val autoDevFile = getAutoDevConfigFile()
 
-        val currentModified = globalFile.lastModified()
+        val currentModified = maxOf(
+            if (acpManagerFile.exists()) acpManagerFile.lastModified() else 0,
+            if (autoDevFile.exists()) autoDevFile.lastModified() else 0
+        )
+
         if (cachedConfig != null && currentModified == lastModified) {
             return cachedConfig!!
         }
 
         try {
             val yaml = Yaml()
-            val data = globalFile.reader().use { yaml.load<Map<String, Any>>(it) } ?: emptyMap()
 
-            @Suppress("UNCHECKED_CAST")
-            val agentsMap = data["agents"] as? Map<String, Map<String, Any>> ?: emptyMap()
-            val activeAgent = data["activeAgent"] as? String
+            // 1. Load AutoDev config first (highest priority for agents)
+            val autoDevAgents = if (autoDevFile.exists()) {
+                loadAutoDevAcpAgents(autoDevFile, yaml)
+            } else {
+                emptyMap()
+            }
+            log.info("Loaded ${autoDevAgents.size} agents from AutoDev config")
 
-            val agents = agentsMap.mapValues { (_, v) ->
-                AcpAgentConfig(
-                    command = v["command"] as? String ?: "",
-                    args = (v["args"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
-                    env = (v["env"] as? Map<*, *>)?.entries?.associate {
-                        it.key.toString() to it.value.toString()
-                    } ?: emptyMap(),
-                    description = v["description"] as? String ?: "",
-                    autoApprove = v["autoApprove"] as? Boolean ?: false,
-                )
+            // 2. Load ACP Manager config
+            val acpManagerAgents = if (acpManagerFile.exists()) {
+                loadAcpManagerConfig(acpManagerFile, yaml)
+            } else {
+                emptyMap()
+            }
+            log.info("Loaded ${acpManagerAgents.size} agents from ACP Manager config")
+
+            // 3. Detect presets for agents NOT already in autodev or acp-manager
+            val existingAgentIds = (autoDevAgents.keys + acpManagerAgents.keys).toSet()
+            val presetAgents = detectPresetsExcluding(existingAgentIds)
+            log.info("Detected ${presetAgents.size} additional ACP agent presets from PATH")
+
+            // 4. Merge configs (priority: ACP Manager > AutoDev > Presets)
+            val mergedAgents = presetAgents + autoDevAgents + acpManagerAgents
+
+            // 5. Determine active agent
+            val activeAgent = when {
+                acpManagerFile.exists() -> {
+                    val data = yaml.load<Map<String, Any>>(acpManagerFile.reader())
+                    data?.get("activeAgent") as? String
+                }
+                autoDevFile.exists() -> {
+                    val data = yaml.load<Map<String, Any>>(autoDevFile.reader())
+                    data?.get("activeAcpAgent") as? String
+                }
+                else -> mergedAgents.keys.firstOrNull()
             }
 
-            cachedConfig = AcpManagerConfig(agents = agents, activeAgent = activeAgent)
+            cachedConfig = AcpManagerConfig(agents = mergedAgents, activeAgent = activeAgent)
             lastModified = currentModified
-            log.info("Loaded ACP config: ${agents.size} agents configured")
+
+            log.info("Loaded ACP config: ${mergedAgents.size} agents total (${autoDevAgents.size} AutoDev + ${acpManagerAgents.size} manual + ${presetAgents.size} presets)")
         } catch (e: Exception) {
             log.warn("Failed to load ACP config: ${e.message}", e)
             cachedConfig = AcpManagerConfig()
@@ -82,7 +124,103 @@ class AcpConfigService(private val project: Project) {
     }
 
     /**
-     * Save the configuration to disk.
+     * Detect installed ACP agent presets from PATH, excluding already configured agents.
+     */
+    private fun detectPresetsExcluding(excludeIds: Set<String>): Map<String, AcpAgentConfig> {
+        return try {
+            AcpAgentPresets.detectInstalled()
+                .filter { preset -> preset.id !in excludeIds }
+                .associate { preset -> preset.id to preset.toConfig() }
+        } catch (e: Exception) {
+            log.warn("Failed to detect ACP agent presets: ${e.message}")
+            emptyMap()
+        }
+    }
+
+    /**
+     * Load agents from ACP Manager config.yaml format.
+     */
+    private fun loadAcpManagerConfig(file: File, yaml: Yaml): Map<String, AcpAgentConfig> {
+        val data = yaml.load<Map<String, Any>>(file.reader()) ?: return emptyMap()
+
+        @Suppress("UNCHECKED_CAST")
+        val agentsMap = data["agents"] as? Map<String, Map<String, Any>> ?: return emptyMap()
+
+        return agentsMap.mapValues { (_, v) ->
+            AcpAgentConfig(
+                command = v["command"] as? String ?: "",
+                args = (v["args"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
+                env = (v["env"] as? Map<*, *>)?.entries?.associate {
+                    it.key.toString() to it.value.toString()
+                } ?: emptyMap(),
+                description = v["description"] as? String ?: "",
+                autoApprove = v["autoApprove"] as? Boolean ?: false,
+            )
+        }
+    }
+
+    /**
+     * Load ACP agents from AutoDev config.yaml format.
+     *
+     * AutoDev format:
+     * ```yaml
+     * acpAgents:
+     *   kimi:
+     *     name: "Kimi CLI"
+     *     command: "kimi"
+     *     args: "--acp"
+     *     env: "KIMI_API_KEY=xxx"
+     * activeAcpAgent: kimi
+     * ```
+     */
+    private fun loadAutoDevAcpAgents(file: File, yaml: Yaml): Map<String, AcpAgentConfig> {
+        try {
+            val data = yaml.load<Map<String, Any>>(file.reader()) ?: return emptyMap()
+
+            @Suppress("UNCHECKED_CAST")
+            val acpAgentsMap = data["acpAgents"] as? Map<String, Map<String, Any>> ?: return emptyMap()
+
+            return acpAgentsMap.mapValues { (_, v) ->
+                val name = v["name"] as? String ?: ""
+                val command = v["command"] as? String ?: ""
+                val argsStr = v["args"] as? String ?: ""
+                val envStr = v["env"] as? String ?: ""
+
+                // Parse args from space-separated string
+                val argsList = argsStr.trim()
+                    .split("\\s+".toRegex())
+                    .filter { it.isNotBlank() }
+
+                // Parse env from "KEY=VALUE" lines
+                val envMap = envStr.lines()
+                    .mapNotNull { line ->
+                        val trimmed = line.trim()
+                        if (trimmed.isEmpty() || trimmed.startsWith("#")) return@mapNotNull null
+                        val idx = trimmed.indexOf('=')
+                        if (idx <= 0) return@mapNotNull null
+                        val key = trimmed.substring(0, idx).trim()
+                        val value = trimmed.substring(idx + 1).trim()
+                        key to value
+                    }
+                    .toMap()
+
+                AcpAgentConfig(
+                    command = command,
+                    args = argsList,
+                    env = envMap,
+                    description = name,
+                    autoApprove = false,
+                )
+            }
+        } catch (e: Exception) {
+            log.warn("Failed to parse AutoDev ACP agents: ${e.message}")
+            return emptyMap()
+        }
+    }
+
+    /**
+     * Save the configuration to ACP Manager config file only.
+     * (We don't modify the AutoDev config file)
      */
     fun saveConfig(config: AcpManagerConfig) {
         val globalFile = getGlobalConfigFile()
@@ -180,7 +318,9 @@ class AcpConfigService(private val project: Project) {
         file.writeText(
             """
             |# ACP Manager Configuration
-            |# Add your ACP-compatible agents here.
+            |# 
+            |# NOTE: ACP Manager automatically detects agents from ~/.autodev/config.yaml
+            |# You can add additional agents here, or use this file exclusively.
             |#
             |# Example:
             |# activeAgent: codex

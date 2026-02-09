@@ -1,0 +1,121 @@
+package com.github.phodal.acpmanager.config
+
+/**
+ * Well-known ACP agent presets with auto-detection.
+ *
+ * Provides common ACP-compliant CLI tools (Kimi, Gemini, Claude, Codex, etc.)
+ * with their standard command-line invocations. Detects which agents are
+ * installed on the system by checking PATH.
+ */
+data class AcpAgentPreset(
+    val id: String,
+    val name: String,
+    val command: String,
+    val args: List<String>,
+    val description: String,
+) {
+    fun toConfig(): AcpAgentConfig = AcpAgentConfig(
+        command = command,
+        args = args,
+        env = emptyMap(),
+        description = name,
+        autoApprove = false,
+    )
+}
+
+/**
+ * Known ACP agent presets.
+ */
+object AcpAgentPresets {
+    val allPresets = listOf(
+        AcpAgentPreset(
+            id = "opencode",
+            name = "OpenCode",
+            command = "opencode",
+            args = listOf("acp"),
+            description = "OpenCode AI coding agent"
+        ),
+        AcpAgentPreset(
+            id = "kimi",
+            name = "Kimi",
+            command = "kimi",
+            args = listOf("acp"),
+            description = "Moonshot AI's Kimi CLI"
+        ),
+        AcpAgentPreset(
+            id = "gemini",
+            name = "Gemini",
+            command = "gemini",
+            args = listOf("--experimental-acp"),
+            description = "Google Gemini CLI"
+        ),
+        AcpAgentPreset(
+            id = "claude",
+            name = "Claude Code",
+            command = "claude",
+            args = emptyList(),
+            description = "Anthropic Claude Code"
+        ),
+        AcpAgentPreset(
+            id = "codex",
+            name = "Codex",
+            command = "codex",
+            args = listOf("--acp"),
+            description = "OpenAI Codex CLI"
+        ),
+        AcpAgentPreset(
+            id = "copilot",
+            name = "GitHub Copilot",
+            command = "copilot",
+            args = listOf("--acp"),
+            description = "GitHub Copilot CLI"
+        ),
+        AcpAgentPreset(
+            id = "auggie",
+            name = "Auggie",
+            command = "auggie",
+            args = listOf("--acp"),
+            description = "Augment Code's AI agent"
+        ),
+    )
+
+    /**
+     * Detect installed presets by checking if the command is in PATH.
+     */
+    fun detectInstalled(): List<AcpAgentPreset> {
+        return allPresets.mapNotNull { preset ->
+            val resolvedPath = findExecutable(preset.command)
+            if (resolvedPath != null) {
+                preset.copy(command = resolvedPath)
+            } else {
+                null
+            }
+        }
+    }
+
+    /**
+     * Find absolute path of an executable using `which` (Unix/macOS) or `where` (Windows).
+     */
+    private fun findExecutable(command: String): String? {
+        return try {
+            val isWindows = System.getProperty("os.name", "").lowercase().contains("win")
+            val checkCmd = if (isWindows) listOf("where", command) else listOf("which", command)
+            
+            val process = ProcessBuilder(checkCmd)
+                .redirectErrorStream(true)
+                .start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            val exitCode = process.waitFor()
+            
+            if (exitCode == 0 && output.isNotBlank()) {
+                // On Windows, `where` may return multiple lines; take the first
+                output.lines().firstOrNull()?.trim()
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+}

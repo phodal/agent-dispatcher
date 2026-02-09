@@ -39,9 +39,7 @@ class ChatPanel(
     }
     private val scrollPane: JBScrollPane
     private val inputArea: JBTextArea
-    private val sendButton: JButton
-    private val cancelButton: JButton
-    private val statusLabel: JBLabel
+    private val inputToolbar: ChatInputToolbar
     private var streamingPanel: StreamingMessagePanel? = null
     private var thinkingPanel: StreamingMessagePanel? = null
 
@@ -55,13 +53,13 @@ class ChatPanel(
             border = JBUI.Borders.empty()
         }
 
-        // Input area
-        inputArea = JBTextArea(3, 40).apply {
+        // Input area - larger and more prominent
+        inputArea = JBTextArea(4, 40).apply {
             lineWrap = true
             wrapStyleWord = true
             border = JBUI.Borders.empty(8)
-            font = UIUtil.getLabelFont()
-            emptyText.text = "Type a message... (Shift+Enter for newline, Enter to send)"
+            font = UIUtil.getLabelFont().deriveFont(14f)
+            emptyText.text = "Type your message here... (Shift+Enter for newline, Enter to send)"
         }
 
         inputArea.addKeyListener(object : KeyAdapter() {
@@ -73,35 +71,25 @@ class ChatPanel(
             }
         })
 
-        sendButton = JButton("Send").apply {
-            addActionListener { sendMessage() }
-        }
+        // Input toolbar (bottom: agent selector + send button)
+        inputToolbar = ChatInputToolbar(
+            project = project,
+            onSendClick = { sendMessage() },
+            onStopClick = { cancelMessage() }
+        )
 
-        cancelButton = JButton("Cancel").apply {
-            isVisible = false
-            addActionListener { cancelMessage() }
-        }
-
-        statusLabel = JBLabel("").apply {
-            foreground = UIUtil.getLabelDisabledForeground()
-            font = font.deriveFont(font.size2D - 2)
-        }
-
-        // Input panel layout
-        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-            isOpaque = false
-            add(statusLabel)
-            add(cancelButton)
-            add(sendButton)
-        }
-
+        // Input panel layout - similar to xiuper
         val inputPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.customLineTop(JBColor.border())
+            
+            // Text input in center
             add(JBScrollPane(inputArea).apply {
-                preferredSize = Dimension(0, JBUI.scale(80))
-                border = JBUI.Borders.empty()
+                preferredSize = Dimension(0, JBUI.scale(100))
+                border = JBUI.Borders.empty(4, 8)
             }, BorderLayout.CENTER)
-            add(buttonPanel, BorderLayout.SOUTH)
+            
+            // Toolbar at bottom
+            add(inputToolbar, BorderLayout.SOUTH)
         }
 
         add(scrollPane, BorderLayout.CENTER)
@@ -122,17 +110,18 @@ class ChatPanel(
     }
 
     private fun updateUI(state: AgentSessionState) {
-        // Update buttons
-        sendButton.isEnabled = !state.isProcessing && state.isConnected
-        cancelButton.isVisible = state.isProcessing
+        // Update toolbar
+        inputToolbar.setProcessing(state.isProcessing)
+        inputToolbar.setSendEnabled(!state.isProcessing && state.isConnected)
         inputArea.isEnabled = !state.isProcessing && state.isConnected
 
         // Update status
-        statusLabel.text = when {
+        val statusText = when {
             !state.isConnected -> "Disconnected"
             state.isProcessing -> "Processing..."
-            else -> "Connected"
+            else -> ""
         }
+        inputToolbar.setStatusText(statusText)
 
         // Update messages
         if (state.messages.size != lastRenderedMessageCount) {
@@ -241,7 +230,7 @@ class ChatPanel(
                 session.sendMessage(text)
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater {
-                    statusLabel.text = "Error: ${e.message}"
+                    inputToolbar.setStatusText("Error: ${e.message}")
                 }
             }
         }
@@ -251,6 +240,21 @@ class ChatPanel(
         scope.launch(Dispatchers.IO) {
             session.cancelPrompt()
         }
+    }
+
+    /**
+     * Update the input toolbar with agent list and callbacks.
+     */
+    fun updateInputToolbar(
+        agents: Map<String, com.github.phodal.acpmanager.config.AcpAgentConfig>,
+        currentAgentKey: String?,
+        onAgentSelect: (String) -> Unit,
+        onConfigureClick: () -> Unit
+    ) {
+        inputToolbar.setAgents(agents)
+        inputToolbar.setCurrentAgent(currentAgentKey)
+        inputToolbar.setOnAgentSelect(onAgentSelect)
+        inputToolbar.setOnConfigureClick(onConfigureClick)
     }
 
     override fun dispose() {

@@ -27,7 +27,7 @@
         <toolWindow id="ACP Manager"
                     factoryClass="com.github.phodal.acpmanager.ui.AcpToolWindowFactory"
                     anchor="right"
-                    icon="AllIcons.Actions.Execute"/>
+                    icon="com.github.phodal.acpmanager.AcpIcons.ToolWindow"/>
 
         <projectService serviceImplementation="com.github.phodal.acpmanager.config.AcpConfigService"/>
         <projectService serviceImplementation="com.github.phodal.acpmanager.acp.AcpSessionManager"/>
