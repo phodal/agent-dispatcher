@@ -5,6 +5,7 @@ import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 plugins {
     id("java") // Java support
     alias(libs.plugins.kotlin) // Kotlin support
+    alias(libs.plugins.kotlinSerialization) // Kotlin Serialization
     alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
     alias(libs.plugins.qodana) // Gradle Qodana Plugin
@@ -31,6 +32,24 @@ repositories {
 
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
 dependencies {
+    // ACP SDK
+    implementation(libs.acp.sdk) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
+    }
+    implementation(libs.acp.model) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
+    }
+
+    // Kotlin libraries
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.io.core)
+
+    // YAML config
+    implementation(libs.snakeyaml)
+
     testImplementation(libs.junit)
     testImplementation(libs.opentest4j)
 

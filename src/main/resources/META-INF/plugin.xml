@@ -1,15 +1,35 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.phodal.acpmanager</id>
-    <name>acp-manager</name>
+    <name>ACP Manager</name>
     <vendor>phodal</vendor>
+    <description><![CDATA[
+        ACP (Agent Client Protocol) Manager for IntelliJ IDEA.
+        <br><br>
+        Manage multiple ACP-compatible coding agents (Claude Code, Codex CLI, Gemini CLI, etc.)
+        directly from your IDE.
+        <br><br>
+        Features:
+        <ul>
+            <li>Multi-agent session management</li>
+            <li>Real-time streaming chat interface</li>
+            <li>Tool call visualization</li>
+            <li>Agent process lifecycle management</li>
+            <li>YAML-based configuration</li>
+        </ul>
+    ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
+    <resource-bundle>messages.AcpBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.phodal.acpmanager.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.phodal.acpmanager.startup.MyProjectActivity" />
+        <toolWindow id="ACP Manager"
+                    factoryClass="com.github.phodal.acpmanager.ui.AcpToolWindowFactory"
+                    anchor="right"
+                    icon="AllIcons.Actions.Execute"/>
+
+        <projectService serviceImplementation="com.github.phodal.acpmanager.config.AcpConfigService"/>
+        <projectService serviceImplementation="com.github.phodal.acpmanager.acp.AcpSessionManager"/>
     </extensions>
 </idea-plugin>

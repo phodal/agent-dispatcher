@@ -1,39 +1,34 @@
 package com.github.phodal.acpmanager
 
-import com.intellij.ide.highlighter.XmlFileType
-import com.intellij.openapi.components.service
-import com.intellij.psi.xml.XmlFile
-import com.intellij.testFramework.TestDataPath
+import com.github.phodal.acpmanager.config.AcpAgentConfig
+import com.github.phodal.acpmanager.config.AcpManagerConfig
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import com.intellij.util.PsiErrorElementUtil
-import com.github.phodal.acpmanager.services.MyProjectService
 
-@TestDataPath("\$CONTENT_ROOT/src/test/testData")
 class MyPluginTest : BasePlatformTestCase() {
 
-    fun testXMLFile() {
-        val psiFile = myFixture.configureByText(XmlFileType.INSTANCE, "<foo>bar</foo>")
-        val xmlFile = assertInstanceOf(psiFile, XmlFile::class.java)
+    fun testAgentConfig() {
+        val config = AcpAgentConfig(
+            command = "codex",
+            args = listOf("--full-auto"),
+            env = mapOf("API_KEY" to "test"),
+            description = "Test agent",
+        )
 
-        assertFalse(PsiErrorElementUtil.hasErrors(project, xmlFile.virtualFile))
-
-        assertNotNull(xmlFile.rootTag)
-
-        xmlFile.rootTag?.let {
-            assertEquals("foo", it.name)
-            assertEquals("bar", it.value.text)
-        }
+        assertEquals("codex", config.command)
+        assertEquals(listOf("--full-auto"), config.args)
+        assertEquals(listOf("codex", "--full-auto"), config.getCommandLine())
     }
 
-    fun testRename() {
-        myFixture.testRename("foo.xml", "foo_after.xml", "a2")
+    fun testManagerConfig() {
+        val config = AcpManagerConfig(
+            agents = mapOf(
+                "codex" to AcpAgentConfig(command = "codex"),
+                "claude" to AcpAgentConfig(command = "claude"),
+            ),
+            activeAgent = "codex",
+        )
+
+        assertEquals(2, config.agents.size)
+        assertEquals("codex", config.activeAgent)
     }
-
-    fun testProjectService() {
-        val projectService = project.service<MyProjectService>()
-
-        assertNotSame(projectService.getRandomNumber(), projectService.getRandomNumber())
-    }
-
-    override fun getTestDataPath() = "src/test/testData/rename"
 }

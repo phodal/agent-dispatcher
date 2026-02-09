@@ -1,0 +1,259 @@
+package com.github.phodal.acpmanager.ui
+
+import com.github.phodal.acpmanager.acp.AgentSession
+import com.github.phodal.acpmanager.acp.AgentSessionState
+import com.github.phodal.acpmanager.acp.ChatMessage
+import com.github.phodal.acpmanager.acp.MessageRole
+import com.github.phodal.acpmanager.config.AcpConfigService
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.Project
+import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
+import java.awt.*
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import javax.swing.*
+
+/**
+ * Chat panel for a single ACP agent session.
+ *
+ * Displays the conversation timeline and provides input for sending messages.
+ */
+class ChatPanel(
+    private val project: Project,
+    private val session: AgentSession,
+) : JPanel(BorderLayout()), Disposable {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val messagesPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        background = UIUtil.getPanelBackground()
+    }
+    private val scrollPane: JBScrollPane
+    private val inputArea: JBTextArea
+    private val sendButton: JButton
+    private val cancelButton: JButton
+    private val statusLabel: JBLabel
+    private var streamingPanel: StreamingMessagePanel? = null
+    private var thinkingPanel: StreamingMessagePanel? = null
+
+    private var lastRenderedMessageCount = 0
+
+    init {
+        // Messages area
+        scrollPane = JBScrollPane(messagesPanel).apply {
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            border = JBUI.Borders.empty()
+        }
+
+        // Input area
+        inputArea = JBTextArea(3, 40).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(8)
+            font = UIUtil.getLabelFont()
+            emptyText.text = "Type a message... (Shift+Enter for newline, Enter to send)"
+        }
+
+        inputArea.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
+                    e.consume()
+                    sendMessage()
+                }
+            }
+        })
+
+        sendButton = JButton("Send").apply {
+            addActionListener { sendMessage() }
+        }
+
+        cancelButton = JButton("Cancel").apply {
+            isVisible = false
+            addActionListener { cancelMessage() }
+        }
+
+        statusLabel = JBLabel("").apply {
+            foreground = UIUtil.getLabelDisabledForeground()
+            font = font.deriveFont(font.size2D - 2)
+        }
+
+        // Input panel layout
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+            isOpaque = false
+            add(statusLabel)
+            add(cancelButton)
+            add(sendButton)
+        }
+
+        val inputPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.customLineTop(JBColor.border())
+            add(JBScrollPane(inputArea).apply {
+                preferredSize = Dimension(0, JBUI.scale(80))
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+            add(buttonPanel, BorderLayout.SOUTH)
+        }
+
+        add(scrollPane, BorderLayout.CENTER)
+        add(inputPanel, BorderLayout.SOUTH)
+
+        // Start observing state changes
+        startStateObserver()
+    }
+
+    private fun startStateObserver() {
+        scope.launch {
+            session.state.collectLatest { state ->
+                ApplicationManager.getApplication().invokeLater {
+                    updateUI(state)
+                }
+            }
+        }
+    }
+
+    private fun updateUI(state: AgentSessionState) {
+        // Update buttons
+        sendButton.isEnabled = !state.isProcessing && state.isConnected
+        cancelButton.isVisible = state.isProcessing
+        inputArea.isEnabled = !state.isProcessing && state.isConnected
+
+        // Update status
+        statusLabel.text = when {
+            !state.isConnected -> "Disconnected"
+            state.isProcessing -> "Processing..."
+            else -> "Connected"
+        }
+
+        // Update messages
+        if (state.messages.size != lastRenderedMessageCount) {
+            renderMessages(state.messages)
+            lastRenderedMessageCount = state.messages.size
+        }
+
+        // Update streaming content
+        updateStreamingContent(state)
+    }
+
+    private fun renderMessages(messages: List<ChatMessage>) {
+        // Remove streaming panels temporarily
+        streamingPanel?.let { messagesPanel.remove(it) }
+        thinkingPanel?.let { messagesPanel.remove(it) }
+
+        // Remove old messages beyond what we already rendered
+        while (messagesPanel.componentCount > 0) {
+            messagesPanel.remove(messagesPanel.componentCount - 1)
+        }
+
+        // Re-render all messages
+        for (message in messages) {
+            val panel = MessagePanel(message)
+            panel.maximumSize = Dimension(Int.MAX_VALUE, panel.preferredSize.height)
+            panel.alignmentX = Component.LEFT_ALIGNMENT
+            messagesPanel.add(panel)
+            messagesPanel.add(Box.createVerticalStrut(2))
+        }
+
+        // Re-add streaming panels if needed
+        streamingPanel?.let {
+            it.alignmentX = Component.LEFT_ALIGNMENT
+            messagesPanel.add(it)
+        }
+        thinkingPanel?.let {
+            it.alignmentX = Component.LEFT_ALIGNMENT
+            messagesPanel.add(it)
+        }
+
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
+
+        // Scroll to bottom
+        SwingUtilities.invokeLater {
+            val bar = scrollPane.verticalScrollBar
+            bar.value = bar.maximum
+        }
+    }
+
+    private fun updateStreamingContent(state: AgentSessionState) {
+        // Handle thinking content
+        if (state.currentThinkingText.isNotBlank()) {
+            if (thinkingPanel == null) {
+                thinkingPanel = StreamingMessagePanel("", isThinking = true).apply {
+                    maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+                    alignmentX = Component.LEFT_ALIGNMENT
+                }
+                messagesPanel.add(thinkingPanel)
+            }
+            thinkingPanel?.updateText(state.currentThinkingText)
+        } else {
+            thinkingPanel?.let {
+                messagesPanel.remove(it)
+                thinkingPanel = null
+            }
+        }
+
+        // Handle streaming content
+        if (state.currentStreamingText.isNotBlank()) {
+            if (streamingPanel == null) {
+                streamingPanel = StreamingMessagePanel("").apply {
+                    maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+                    alignmentX = Component.LEFT_ALIGNMENT
+                }
+                messagesPanel.add(streamingPanel)
+            }
+            streamingPanel?.updateText(state.currentStreamingText)
+        } else {
+            streamingPanel?.let {
+                messagesPanel.remove(it)
+                streamingPanel = null
+            }
+        }
+
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
+
+        // Scroll to bottom during streaming
+        if (state.isProcessing) {
+            SwingUtilities.invokeLater {
+                val bar = scrollPane.verticalScrollBar
+                bar.value = bar.maximum
+            }
+        }
+    }
+
+    private fun sendMessage() {
+        val text = inputArea.text?.trim() ?: return
+        if (text.isBlank()) return
+
+        inputArea.text = ""
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                session.sendMessage(text)
+            } catch (e: Exception) {
+                ApplicationManager.getApplication().invokeLater {
+                    statusLabel.text = "Error: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun cancelMessage() {
+        scope.launch(Dispatchers.IO) {
+            session.cancelPrompt()
+        }
+    }
+
+    override fun dispose() {
+        scope.cancel()
+    }
+}
