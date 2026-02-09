@@ -4,12 +4,16 @@ import com.agentclientprotocol.common.Event
 import com.agentclientprotocol.model.*
 import com.github.phodal.acpmanager.config.AcpAgentConfig
 import com.github.phodal.acpmanager.config.AcpConfigService
+import com.github.phodal.acpmanager.ui.renderer.PlanEntry
+import com.github.phodal.acpmanager.ui.renderer.PlanEntryStatus
+import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -64,6 +68,14 @@ class AgentSession(
 
     private val _state = MutableStateFlow(AgentSessionState(agentKey))
     val state: StateFlow<AgentSessionState> = _state.asStateFlow()
+
+    // Render events flow for UI updates
+    private val _renderEvents = MutableSharedFlow<RenderEvent>(
+        replay = 0,
+        extraBufferCapacity = 100,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val renderEvents: SharedFlow<RenderEvent> = _renderEvents.asSharedFlow()
 
     // Tool call dedup tracking
     private val renderedToolCallIds = mutableSetOf<String>()
@@ -139,12 +151,14 @@ class AgentSession(
             this.client = acpClient
 
             updateState { copy(isConnected = true, error = null) }
+            emitRenderEvent(RenderEvent.Connected(agentKey))
             addMessage(ChatMessage(MessageRole.INFO, "Connected to agent '$agentKey'"))
 
             log.info("Session '$agentKey' connected successfully")
         } catch (e: Exception) {
             log.warn("Failed to connect to agent '$agentKey': ${e.message}", e)
             updateState { copy(isConnected = false, error = "Connection failed: ${e.message}") }
+            emitRenderEvent(RenderEvent.Error("Connection failed: ${e.message}"))
             addMessage(ChatMessage(MessageRole.ERROR, "Connection failed: ${e.message}"))
             throw e
         } finally {
@@ -159,6 +173,8 @@ class AgentSession(
         log.info("sendMessage called for '$agentKey' with text: ${text.take(50)}...")
         val acpClient = client ?: throw IllegalStateException("Not connected")
 
+        // Emit user message event
+        emitRenderEvent(RenderEvent.UserMessage(text))
         addMessage(ChatMessage(MessageRole.USER, text))
         updateState { copy(isProcessing = true, currentStreamingText = "", currentThinkingText = "") }
 
@@ -169,6 +185,7 @@ class AgentSession(
 
         var receivedAnyChunk = false
         var inThought = false
+        var inMessage = false
         val messageBuffer = StringBuilder()
         val thoughtBuffer = StringBuilder()
 
@@ -178,7 +195,7 @@ class AgentSession(
                 log.info("Received event for '$agentKey': ${event::class.simpleName}")
                 when (event) {
                     is Event.SessionUpdateEvent -> {
-                        processSessionUpdate(
+                        processSessionUpdateWithEvents(
                             event.update,
                             messageBuffer,
                             thoughtBuffer,
@@ -186,26 +203,32 @@ class AgentSession(
                             { receivedAnyChunk = it },
                             { inThought },
                             { inThought = it },
+                            { inMessage },
+                            { inMessage = it },
                         )
                     }
 
                     is Event.PromptResponseEvent -> {
                         // Finalize thinking
                         if (inThought && thoughtBuffer.isNotBlank()) {
+                            emitRenderEvent(RenderEvent.ThinkingEnd(thoughtBuffer.toString()))
                             addMessage(ChatMessage(MessageRole.THINKING, thoughtBuffer.toString(), isThinking = true))
                             thoughtBuffer.clear()
                         }
 
                         // Finalize message
                         if (messageBuffer.isNotBlank()) {
+                            emitRenderEvent(RenderEvent.MessageEnd(messageBuffer.toString()))
                             addMessage(ChatMessage(MessageRole.ASSISTANT, messageBuffer.toString()))
                             messageBuffer.clear()
                         }
 
                         if (!receivedAnyChunk) {
+                            emitRenderEvent(RenderEvent.Info("Agent ended without output (stopReason=${event.response.stopReason})"))
                             addMessage(ChatMessage(MessageRole.INFO, "Agent ended without output (stopReason=${event.response.stopReason})"))
                         }
 
+                        emitRenderEvent(RenderEvent.PromptComplete(event.response.stopReason?.name))
                         updateState {
                             copy(
                                 isProcessing = false,
@@ -224,19 +247,22 @@ class AgentSession(
 
             // Finalize any pending content
             if (thoughtBuffer.isNotBlank()) {
+                emitRenderEvent(RenderEvent.ThinkingEnd(thoughtBuffer.toString()))
                 addMessage(ChatMessage(MessageRole.THINKING, thoughtBuffer.toString(), isThinking = true))
             }
             if (messageBuffer.isNotBlank()) {
+                emitRenderEvent(RenderEvent.MessageEnd(messageBuffer.toString()))
                 addMessage(ChatMessage(MessageRole.ASSISTANT, messageBuffer.toString()))
             }
 
+            emitRenderEvent(RenderEvent.Error("Error: ${e.message}"))
             addMessage(ChatMessage(MessageRole.ERROR, "Error: ${e.message}"))
             updateState { copy(isProcessing = false, currentStreamingText = "", currentThinkingText = "") }
         }
     }
 
     @OptIn(com.agentclientprotocol.annotations.UnstableApi::class)
-    private fun processSessionUpdate(
+    private fun processSessionUpdateWithEvents(
         update: SessionUpdate,
         messageBuffer: StringBuilder,
         thoughtBuffer: StringBuilder,
@@ -244,37 +270,64 @@ class AgentSession(
         setReceivedChunk: (Boolean) -> Unit,
         getInThought: () -> Boolean,
         setInThought: (Boolean) -> Unit,
+        getInMessage: () -> Boolean,
+        setInMessage: (Boolean) -> Unit,
     ) {
         when (update) {
             is SessionUpdate.AgentMessageChunk -> {
                 // Transition from thinking to message
                 if (getInThought() && thoughtBuffer.isNotBlank()) {
+                    emitRenderEvent(RenderEvent.ThinkingEnd(thoughtBuffer.toString()))
                     addMessage(ChatMessage(MessageRole.THINKING, thoughtBuffer.toString(), isThinking = true))
                     thoughtBuffer.clear()
                     setInThought(false)
                     updateState { copy(currentThinkingText = "") }
                 }
 
+                // Start message streaming if not already
+                if (!getInMessage()) {
+                    emitRenderEvent(RenderEvent.MessageStart())
+                    setInMessage(true)
+                }
+
                 setReceivedChunk(true)
                 val text = AcpClient.extractText(update.content)
                 messageBuffer.append(text)
+                emitRenderEvent(RenderEvent.MessageChunk(text))
                 updateState { copy(currentStreamingText = messageBuffer.toString()) }
             }
 
             is SessionUpdate.AgentThoughtChunk -> {
-                setInThought(true)
+                // Start thinking if not already
+                if (!getInThought()) {
+                    emitRenderEvent(RenderEvent.ThinkingStart())
+                    setInThought(true)
+                }
                 val thought = AcpClient.extractText(update.content)
                 thoughtBuffer.append(thought)
+                emitRenderEvent(RenderEvent.ThinkingChunk(thought))
                 updateState { copy(currentThinkingText = thoughtBuffer.toString()) }
             }
 
             is SessionUpdate.PlanUpdate -> {
+                val entries = update.entries.map { entry ->
+                    PlanEntry(
+                        content = entry.content,
+                        status = when (entry.status) {
+                            com.agentclientprotocol.model.PlanEntryStatus.COMPLETED -> PlanEntryStatus.COMPLETED
+                            com.agentclientprotocol.model.PlanEntryStatus.IN_PROGRESS -> PlanEntryStatus.IN_PROGRESS
+                            com.agentclientprotocol.model.PlanEntryStatus.PENDING -> PlanEntryStatus.PENDING
+                        }
+                    )
+                }
+                emitRenderEvent(RenderEvent.PlanUpdate(entries))
+
                 val planText = buildString {
                     update.entries.forEachIndexed { index, entry ->
                         val marker = when (entry.status) {
-                            PlanEntryStatus.COMPLETED -> "[x]"
-                            PlanEntryStatus.IN_PROGRESS -> "[*]"
-                            PlanEntryStatus.PENDING -> "[ ]"
+                            com.agentclientprotocol.model.PlanEntryStatus.COMPLETED -> "[x]"
+                            com.agentclientprotocol.model.PlanEntryStatus.IN_PROGRESS -> "[*]"
+                            com.agentclientprotocol.model.PlanEntryStatus.PENDING -> "[ ]"
                         }
                         appendLine("${index + 1}. $marker ${entry.content}")
                     }
@@ -284,23 +337,25 @@ class AgentSession(
                 }
             }
 
-            is SessionUpdate.ToolCall -> handleToolCallUpdate(
+            is SessionUpdate.ToolCall -> handleToolCallUpdateWithEvents(
                 update.toolCallId.value, update.title, update.kind?.name, update.status,
                 update.rawInput?.toString(), update.rawOutput?.toString()
             )
 
-            is SessionUpdate.ToolCallUpdate -> handleToolCallUpdate(
+            is SessionUpdate.ToolCallUpdate -> handleToolCallUpdateWithEvents(
                 update.toolCallId.value, update.title, update.kind?.name, update.status,
                 update.rawInput?.toString(), update.rawOutput?.toString()
             )
 
             is SessionUpdate.CurrentModeUpdate -> {
-                addMessage(ChatMessage(MessageRole.INFO, "Mode switched to: ${update.currentModeId}"))
+                emitRenderEvent(RenderEvent.ModeChange(update.currentModeId.value))
+                addMessage(ChatMessage(MessageRole.INFO, "Mode switched to: ${update.currentModeId.value}"))
             }
 
             is SessionUpdate.ConfigOptionUpdate -> {
                 val summary = update.configOptions.joinToString(", ") { it.name }
                 if (summary.isNotBlank()) {
+                    emitRenderEvent(RenderEvent.Info("Config updated: $summary"))
                     addMessage(ChatMessage(MessageRole.INFO, "Config updated: $summary"))
                 }
             }
@@ -311,7 +366,7 @@ class AgentSession(
         }
     }
 
-    private fun handleToolCallUpdate(
+    private fun handleToolCallUpdateWithEvents(
         toolCallId: String?,
         title: String?,
         kind: String?,
@@ -333,6 +388,13 @@ class AgentSession(
         if (isRunning) {
             if (id.isNotBlank() && !startedToolCallIds.contains(id)) {
                 val toolTitle = toolCallTitles[id] ?: currentTitle ?: "tool"
+                // Emit tool call start event
+                emitRenderEvent(RenderEvent.ToolCallStart(
+                    toolCallId = id,
+                    toolName = kind ?: "tool",
+                    title = toolTitle,
+                    kind = kind
+                ))
                 addMessage(ChatMessage(
                     role = MessageRole.TOOL_CALL,
                     content = toolTitle,
@@ -341,6 +403,13 @@ class AgentSession(
                     toolCallKind = kind,
                 ))
                 startedToolCallIds.add(id)
+            } else if (id.isNotBlank()) {
+                // Emit update event for status changes
+                emitRenderEvent(RenderEvent.ToolCallUpdate(
+                    toolCallId = id,
+                    status = status ?: ToolCallStatus.IN_PROGRESS,
+                    title = currentTitle
+                ))
             }
             return
         }
@@ -350,6 +419,14 @@ class AgentSession(
         // Terminal state: render result
         val toolTitle = (if (id.isNotBlank()) toolCallTitles[id] else null) ?: currentTitle ?: "tool"
         val output = rawOutput?.takeIf { it.isNotBlank() } ?: if (status == ToolCallStatus.COMPLETED) "Done" else "Failed"
+
+        // Emit tool call end event
+        emitRenderEvent(RenderEvent.ToolCallEnd(
+            toolCallId = id,
+            status = status ?: ToolCallStatus.COMPLETED,
+            title = toolTitle,
+            output = output
+        ))
 
         addMessage(ChatMessage(
             role = MessageRole.TOOL_RESULT,
@@ -423,6 +500,7 @@ class AgentSession(
         }
         client = null
         managedProcess = null
+        emitRenderEvent(RenderEvent.Disconnected(agentKey))
         updateState { copy(isConnected = false, isProcessing = false) }
     }
 
@@ -435,7 +513,7 @@ class AgentSession(
     }
 
     /**
-     * Clear the chat history.
+     * Clear the chat history and render events.
      */
     fun clearMessages() {
         updateState { copy(messages = emptyList(), currentStreamingText = "", currentThinkingText = "") }
@@ -443,6 +521,10 @@ class AgentSession(
 
     private fun addMessage(message: ChatMessage) {
         updateState { copy(messages = messages + message) }
+    }
+
+    private fun emitRenderEvent(event: RenderEvent) {
+        _renderEvents.tryEmit(event)
     }
 
     private inline fun updateState(transform: AgentSessionState.() -> AgentSessionState) {

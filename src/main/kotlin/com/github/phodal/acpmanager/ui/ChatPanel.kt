@@ -2,15 +2,16 @@ package com.github.phodal.acpmanager.ui
 
 import com.github.phodal.acpmanager.acp.AgentSession
 import com.github.phodal.acpmanager.acp.AgentSessionState
-import com.github.phodal.acpmanager.acp.ChatMessage
-import com.github.phodal.acpmanager.acp.MessageRole
 import com.github.phodal.acpmanager.config.AcpConfigService
+import com.github.phodal.acpmanager.ui.renderer.AcpEventRenderer
+import com.github.phodal.acpmanager.ui.renderer.AcpEventRendererRegistry
+import com.github.phodal.acpmanager.ui.renderer.DefaultRendererFactory
+import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
@@ -33,25 +34,33 @@ private val log = logger<ChatPanel>()
 class ChatPanel(
     private val project: Project,
     private val session: AgentSession,
+    private val agentType: String = "default",
 ) : JPanel(BorderLayout()), Disposable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private val messagesPanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        background = UIUtil.getPanelBackground()
-    }
     private val scrollPane: JBScrollPane
     private val inputArea: JBTextArea
     private val inputToolbar: ChatInputToolbar
-    private var streamingPanel: StreamingMessagePanel? = null
-    private var thinkingPanel: StreamingMessagePanel? = null
 
-    private var lastRenderedMessageCount = 0
+    // Event-driven renderer
+    private val renderer: AcpEventRenderer
 
     init {
-        // Messages area
-        scrollPane = JBScrollPane(messagesPanel).apply {
+        // Ensure default factory is registered
+        if (AcpEventRendererRegistry.getFactory("default") == null) {
+            AcpEventRendererRegistry.setDefaultFactory(DefaultRendererFactory())
+        }
+
+        // Create renderer with scroll callback
+        renderer = AcpEventRendererRegistry.createRenderer(
+            agentKey = session.agentKey,
+            agentType = agentType,
+            scrollCallback = { scrollToBottom() }
+        )
+
+        // Messages area using renderer's container
+        scrollPane = JBScrollPane(renderer.container).apply {
             verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
             border = JBUI.Borders.empty()
@@ -101,28 +110,48 @@ class ChatPanel(
 
         // Immediately render current state (synchronously)
         val currentState = session.state.value
-        log.info("ChatPanel: Initial state for '${session.agentKey}': messages=${currentState.messages.size}, connected=${currentState.isConnected}")
-        updateUI(currentState)
+        log.info("ChatPanel: Initial state for '${session.agentKey}': connected=${currentState.isConnected}")
+        updateToolbarState(currentState)
 
-        // Start observing state changes for future updates
+        // Start observing render events
+        startRenderEventObserver()
+
+        // Start observing state changes for toolbar updates
         startStateObserver()
+    }
+
+    private fun scrollToBottom() {
+        SwingUtilities.invokeLater {
+            val bar = scrollPane.verticalScrollBar
+            bar.value = bar.maximum
+        }
+    }
+
+    private fun startRenderEventObserver() {
+        scope.launch(Dispatchers.Default) {
+            log.info("ChatPanel: Starting render event observer for '${session.agentKey}'")
+            session.renderEvents.collect { event ->
+                log.info("ChatPanel: Received render event for '${session.agentKey}': ${event::class.simpleName}")
+                ApplicationManager.getApplication().invokeLater {
+                    renderer.onEvent(event)
+                }
+            }
+        }
     }
 
     private fun startStateObserver() {
         scope.launch(Dispatchers.Default) {
             log.info("ChatPanel: Starting state observer for '${session.agentKey}'")
             session.state.collectLatest { state ->
-                log.info("ChatPanel: Received state update for '${session.agentKey}': messages=${state.messages.size}, streaming='${state.currentStreamingText.take(20)}...', processing=${state.isProcessing}")
+                log.info("ChatPanel: Received state update for '${session.agentKey}': processing=${state.isProcessing}")
                 ApplicationManager.getApplication().invokeLater {
-                    updateUI(state)
+                    updateToolbarState(state)
                 }
             }
         }
     }
 
-    private fun updateUI(state: AgentSessionState) {
-        log.info("ChatPanel: updateUI called for '${session.agentKey}': messages=${state.messages.size}, streaming='${state.currentStreamingText.take(20)}...'")
-
+    private fun updateToolbarState(state: AgentSessionState) {
         // Update toolbar
         inputToolbar.setProcessing(state.isProcessing)
         inputToolbar.setSendEnabled(!state.isProcessing && state.isConnected)
@@ -144,102 +173,6 @@ class ChatPanel(
             else -> "Connected"
         }
         inputToolbar.setStatusText(statusText)
-
-        // Update messages
-        if (state.messages.size != lastRenderedMessageCount) {
-            log.info("ChatPanel: Rendering ${state.messages.size} messages (was $lastRenderedMessageCount)")
-            renderMessages(state.messages)
-            lastRenderedMessageCount = state.messages.size
-        }
-
-        // Update streaming content
-        updateStreamingContent(state)
-    }
-
-    private fun renderMessages(messages: List<ChatMessage>) {
-        // Remove streaming panels temporarily
-        streamingPanel?.let { messagesPanel.remove(it) }
-        thinkingPanel?.let { messagesPanel.remove(it) }
-
-        // Remove old messages beyond what we already rendered
-        while (messagesPanel.componentCount > 0) {
-            messagesPanel.remove(messagesPanel.componentCount - 1)
-        }
-
-        // Re-render all messages
-        for (message in messages) {
-            val panel = MessagePanel(message)
-            panel.maximumSize = Dimension(Int.MAX_VALUE, panel.preferredSize.height)
-            panel.alignmentX = Component.LEFT_ALIGNMENT
-            messagesPanel.add(panel)
-            messagesPanel.add(Box.createVerticalStrut(2))
-        }
-
-        // Re-add streaming panels if needed
-        streamingPanel?.let {
-            it.alignmentX = Component.LEFT_ALIGNMENT
-            messagesPanel.add(it)
-        }
-        thinkingPanel?.let {
-            it.alignmentX = Component.LEFT_ALIGNMENT
-            messagesPanel.add(it)
-        }
-
-        messagesPanel.revalidate()
-        messagesPanel.repaint()
-
-        // Scroll to bottom
-        SwingUtilities.invokeLater {
-            val bar = scrollPane.verticalScrollBar
-            bar.value = bar.maximum
-        }
-    }
-
-    private fun updateStreamingContent(state: AgentSessionState) {
-        // Handle thinking content
-        if (state.currentThinkingText.isNotBlank()) {
-            if (thinkingPanel == null) {
-                thinkingPanel = StreamingMessagePanel("", isThinking = true).apply {
-                    maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-                    alignmentX = Component.LEFT_ALIGNMENT
-                }
-                messagesPanel.add(thinkingPanel)
-            }
-            thinkingPanel?.updateText(state.currentThinkingText)
-        } else {
-            thinkingPanel?.let {
-                messagesPanel.remove(it)
-                thinkingPanel = null
-            }
-        }
-
-        // Handle streaming content
-        if (state.currentStreamingText.isNotBlank()) {
-            if (streamingPanel == null) {
-                streamingPanel = StreamingMessagePanel("").apply {
-                    maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-                    alignmentX = Component.LEFT_ALIGNMENT
-                }
-                messagesPanel.add(streamingPanel)
-            }
-            streamingPanel?.updateText(state.currentStreamingText)
-        } else {
-            streamingPanel?.let {
-                messagesPanel.remove(it)
-                streamingPanel = null
-            }
-        }
-
-        messagesPanel.revalidate()
-        messagesPanel.repaint()
-
-        // Scroll to bottom during streaming
-        if (state.isProcessing) {
-            SwingUtilities.invokeLater {
-                val bar = scrollPane.verticalScrollBar
-                bar.value = bar.maximum
-            }
-        }
     }
 
     private fun sendMessage() {
@@ -313,5 +246,6 @@ class ChatPanel(
 
     override fun dispose() {
         scope.cancel()
+        renderer.dispose()
     }
 }
