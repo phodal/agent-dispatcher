@@ -1,6 +1,7 @@
-package com.github.phodal.acpmanager.ui.renderer
+package com.github.phodal.acpmanager.claudecode
 
 import com.agentclientprotocol.model.ToolCallStatus
+import com.github.phodal.acpmanager.ui.renderer.*
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
@@ -11,13 +12,17 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.swing.*
 
-private val log = logger<DefaultAcpEventRenderer>()
+private val log = logger<ClaudeCodeRenderer>()
 
 /**
- * Default implementation of AcpEventRenderer.
- * Renders ACP events as a vertical list of message panels.
+ * Custom renderer for Claude Code with Claude-specific styling.
+ *
+ * Features:
+ * - Orange/amber accent colors for Claude branding
+ * - Enhanced tool call display with parameter details
+ * - Compact thinking display
  */
-class DefaultAcpEventRenderer(
+class ClaudeCodeRenderer(
     private val agentKey: String,
     private val scrollCallback: () -> Unit,
 ) : AcpEventRenderer {
@@ -36,8 +41,15 @@ class DefaultAcpEventRenderer(
     // Tool call tracking
     private val toolCallPanels = mutableMapOf<String, ToolCallPanel>()
 
+    // Claude Code colors
+    private val claudeAccent = JBColor(Color(0xD97706), Color(0xFBBF24)) // Amber
+    private val claudeThinkingBg = JBColor(Color(0xFEF3C7), Color(0x422006))
+    private val claudeThinkingFg = JBColor(Color(0x92400E), Color(0xFCD34D))
+    private val claudeMessageBg = JBColor(Color(0xFFF7ED), Color(0x1C1917))
+    private val claudeMessageFg = JBColor(Color(0x9A3412), Color(0xFDBA74))
+
     override fun onEvent(event: RenderEvent) {
-        log.info("DefaultRenderer[$agentKey]: onEvent ${event::class.simpleName}")
+        log.info("ClaudeCodeRenderer[$agentKey]: onEvent ${event::class.simpleName}")
         when (event) {
             is RenderEvent.UserMessage -> addUserMessage(event)
             is RenderEvent.ThinkingStart -> startThinking()
@@ -50,93 +62,105 @@ class DefaultAcpEventRenderer(
             is RenderEvent.ToolCallUpdate -> updateToolCall(event)
             is RenderEvent.ToolCallEnd -> endToolCall(event)
             is RenderEvent.PlanUpdate -> addPlanUpdate(event)
-            is RenderEvent.ModeChange -> addInfo("Mode: ${event.modeId}", event.timestamp)
-            is RenderEvent.Info -> addInfo(event.message, event.timestamp)
-            is RenderEvent.Error -> addError(event.message, event.timestamp)
-            is RenderEvent.Connected -> addInfo("Connected to '$agentKey'", event.timestamp)
-            is RenderEvent.Disconnected -> addInfo("Disconnected from '$agentKey'", event.timestamp)
-            is RenderEvent.PromptComplete -> finalizeStreaming()
+            is RenderEvent.ModeChange -> addModeChange(event)
+            is RenderEvent.Info -> addInfo(event)
+            is RenderEvent.Error -> addError(event)
+            is RenderEvent.Connected -> addConnected(event)
+            is RenderEvent.Disconnected -> addDisconnected(event)
+            is RenderEvent.PromptComplete -> onPromptComplete(event)
         }
-        scrollCallback()
     }
 
     private fun addUserMessage(event: RenderEvent.UserMessage) {
-        val panel = createMessagePanel("You", event.content, event.timestamp,
-            JBColor(Color(0x1565C0), Color(0x64B5F6)),
-            JBColor(Color(0xE3F2FD), Color(0x1A3A5C)))
+        val panel = createMessagePanel(
+            "You", event.content, event.timestamp,
+            JBColor.BLUE, JBColor(Color(0xE3F2FD), Color(0x1A237E))
+        )
         addPanel(panel)
+        scrollCallback()
     }
 
     private fun startThinking() {
-        if (currentThinkingPanel == null) {
-            thinkingBuffer.clear()
-            currentThinkingPanel = StreamingPanel("💡 Thinking...",
-                JBColor(Color(0x6A1B9A), Color(0xCE93D8)),
-                JBColor(Color(0xF3E5F5), Color(0x2A1A2E)))
-            addPanel(currentThinkingPanel!!)
-        }
+        thinkingBuffer.clear()
+        val panel = StreamingPanel(
+            "🧠 Claude is thinking...",
+            claudeThinkingFg,
+            claudeThinkingBg
+        )
+        currentThinkingPanel = panel
+        addPanel(panel)
+        scrollCallback()
     }
 
     private fun appendThinking(content: String) {
         thinkingBuffer.append(content)
-        currentThinkingPanel?.updateContent(thinkingBuffer.toString())
+        val display = if (thinkingBuffer.length > 200) {
+            thinkingBuffer.takeLast(200).toString() + "..."
+        } else {
+            thinkingBuffer.toString()
+        }
+        currentThinkingPanel?.updateContent(display)
+        scrollCallback()
     }
 
     private fun endThinking(fullContent: String) {
-        currentThinkingPanel?.let { container.remove(it) }
-        currentThinkingPanel = null
-        if (fullContent.isNotBlank()) {
-            val panel = createThinkingPanel(fullContent)
-            addPanel(panel)
+        currentThinkingPanel?.let { panel ->
+            container.remove(panel)
+            val finalPanel = createThinkingPanel(fullContent)
+            addPanel(finalPanel)
         }
+        currentThinkingPanel = null
         thinkingBuffer.clear()
+        scrollCallback()
     }
 
     private fun startMessage() {
-        // Finalize thinking first if still active
-        if (currentThinkingPanel != null) {
-            endThinking(thinkingBuffer.toString())
-        }
-        if (currentMessagePanel == null) {
-            messageBuffer.clear()
-            currentMessagePanel = StreamingPanel("Assistant (typing...)",
-                JBColor(Color(0x2E7D32), Color(0x81C784)),
-                JBColor(Color(0xF5F5F5), Color(0x2B2B2B)))
-            addPanel(currentMessagePanel!!)
-        }
+        messageBuffer.clear()
+        val panel = StreamingPanel(
+            "Claude",
+            claudeAccent,
+            claudeMessageBg
+        )
+        currentMessagePanel = panel
+        addPanel(panel)
+        scrollCallback()
     }
 
     private fun appendMessage(content: String) {
-        if (currentMessagePanel == null) startMessage()
         messageBuffer.append(content)
         currentMessagePanel?.updateContent(messageBuffer.toString())
+        scrollCallback()
     }
 
     private fun endMessage(fullContent: String) {
-        currentMessagePanel?.let { container.remove(it) }
-        currentMessagePanel = null
-        if (fullContent.isNotBlank()) {
-            val panel = createMessagePanel("Assistant", fullContent, System.currentTimeMillis(),
-                JBColor(Color(0x2E7D32), Color(0x81C784)),
-                JBColor(Color(0xF5F5F5), Color(0x2B2B2B)))
-            addPanel(panel)
+        currentMessagePanel?.let { panel ->
+            container.remove(panel)
+            val finalPanel = createMessagePanel(
+                "Claude", fullContent, System.currentTimeMillis(),
+                claudeAccent, claudeMessageBg
+            )
+            addPanel(finalPanel)
         }
+        currentMessagePanel = null
         messageBuffer.clear()
+        scrollCallback()
     }
 
     private fun startToolCall(event: RenderEvent.ToolCallStart) {
-        val panel = ToolCallPanel(event.toolCallId, event.title ?: event.toolName)
+        val panel = ToolCallPanel(event.toolName, event.title ?: event.toolName)
         toolCallPanels[event.toolCallId] = panel
         addPanel(panel)
+        scrollCallback()
     }
 
     private fun updateToolCall(event: RenderEvent.ToolCallUpdate) {
         toolCallPanels[event.toolCallId]?.updateStatus(event.status, event.title)
+        scrollCallback()
     }
 
     private fun endToolCall(event: RenderEvent.ToolCallEnd) {
         toolCallPanels[event.toolCallId]?.complete(event.status, event.output)
-        toolCallPanels.remove(event.toolCallId)
+        scrollCallback()
     }
 
     private fun addPlanUpdate(event: RenderEvent.PlanUpdate) {
@@ -150,37 +174,42 @@ class DefaultAcpEventRenderer(
                 appendLine("${i + 1}. $marker ${entry.content}")
             }
         }.trim()
-        if (text.isNotBlank()) addInfo("Plan:\n$text", event.timestamp)
+        if (text.isNotBlank()) addInfoPanel("📋 Plan:\n$text", claudeAccent)
+        scrollCallback()
     }
 
-    private fun finalizeStreaming() {
-        if (currentThinkingPanel != null) endThinking(thinkingBuffer.toString())
-        if (currentMessagePanel != null) endMessage(messageBuffer.toString())
+    private fun addModeChange(event: RenderEvent.ModeChange) {
+        addInfoPanel("Mode: ${event.modeId}", claudeAccent)
     }
 
-    private fun addInfo(message: String, timestamp: Long) {
+    private fun addInfo(event: RenderEvent.Info) {
+        addInfoPanel(event.message, UIUtil.getLabelDisabledForeground())
+    }
+
+    private fun addError(event: RenderEvent.Error) {
+        addInfoPanel("⚠️ ${event.message}", JBColor.RED)
+    }
+
+    private fun addConnected(event: RenderEvent.Connected) {
+        addInfoPanel("🔗 Connected to Claude Code", claudeAccent)
+    }
+
+    private fun addDisconnected(event: RenderEvent.Disconnected) {
+        addInfoPanel("🔌 Disconnected from Claude Code", UIUtil.getLabelDisabledForeground())
+    }
+
+    private fun onPromptComplete(event: RenderEvent.PromptComplete) {
+        log.info("ClaudeCodeRenderer[$agentKey]: Prompt complete (${event.stopReason})")
+    }
+
+    private fun addInfoPanel(text: String, color: Color) {
         val panel = JPanel(BorderLayout()).apply {
-            isOpaque = true
-            background = JBColor(Color(0xE0F7FA), Color(0x1A2F33))
-            border = JBUI.Borders.empty(3, 10)
-            val label = JBLabel("ℹ $message").apply {
-                foreground = JBColor(Color(0x00695C), Color(0x80CBC4))
-                font = font.deriveFont(Font.ITALIC, font.size2D - 1)
-            }
-            add(label, BorderLayout.CENTER)
-        }
-        addPanel(panel)
-    }
-
-    private fun addError(message: String, timestamp: Long) {
-        val panel = JPanel(BorderLayout()).apply {
-            isOpaque = true
-            background = JBColor(Color(0xFFEBEE), Color(0x3A1A1A))
-            border = JBUI.Borders.empty(4, 10)
-            val label = JBLabel("⚠ $message").apply {
-                foreground = JBColor(Color(0xC62828), Color(0xEF9A9A))
-            }
-            add(label, BorderLayout.CENTER)
+            isOpaque = false
+            border = JBUI.Borders.empty(2, 8)
+            add(JBLabel(text).apply {
+                foreground = color
+                font = font.deriveFont(font.size2D - 1)
+            }, BorderLayout.WEST)
         }
         addPanel(panel)
     }
@@ -225,35 +254,23 @@ class DefaultAcpEventRenderer(
         }
     }
 
-    /**
-     * Create a JTextArea that properly wraps text based on parent width.
-     */
     private fun createWrappingTextArea(content: String, foregroundColor: Color? = null): JTextArea {
         return object : JTextArea(content) {
             override fun getPreferredSize(): Dimension {
-                // Get parent width for proper text wrapping
                 val parentWidth = parent?.parent?.parent?.width ?: parent?.parent?.width ?: parent?.width ?: 400
-                val availableWidth = maxOf(100, parentWidth - 50) // Leave some margin
-
-                // Calculate height based on text content and available width
+                val availableWidth = maxOf(100, parentWidth - 50)
                 val fm = getFontMetrics(font)
                 val lines = if (availableWidth > 0 && text.isNotEmpty()) {
                     var lineCount = 0
                     for (line in text.split("\n")) {
-                        if (line.isEmpty()) {
-                            lineCount++
-                        } else {
+                        if (line.isEmpty()) lineCount++ else {
                             val lineWidth = fm.stringWidth(line)
                             lineCount += maxOf(1, (lineWidth + availableWidth - 1) / availableWidth)
                         }
                     }
                     maxOf(1, lineCount)
-                } else {
-                    1
-                }
-
-                val height = lines * fm.height + 4
-                return Dimension(availableWidth, height)
+                } else 1
+                return Dimension(availableWidth, lines * fm.height + 4)
             }
         }.apply {
             isEditable = false
@@ -274,7 +291,7 @@ class DefaultAcpEventRenderer(
             }
         }.apply {
             isOpaque = true
-            background = JBColor(Color(0xF3E5F5), Color(0x2A1A2E))
+            background = claudeThinkingBg
             border = JBUI.Borders.empty(4, 8)
 
             val wrapper = JPanel(BorderLayout()).apply {
@@ -282,15 +299,14 @@ class DefaultAcpEventRenderer(
                 border = JBUI.Borders.empty(4, 10)
             }
 
-            val header = JBLabel("💡 Thinking").apply {
-                foreground = JBColor(Color(0x6A1B9A), Color(0xCE93D8))
+            val header = JBLabel("🧠 Thinking").apply {
+                foreground = claudeThinkingFg
                 font = font.deriveFont(Font.ITALIC, font.size2D - 1)
             }
             wrapper.add(header, BorderLayout.NORTH)
 
             val displayContent = if (content.length > 300) content.take(300) + "..." else content
-            val thinkingColor = JBColor(Color(0x6A1B9A), Color(0xCE93D8))
-            val textArea = createWrappingTextArea(displayContent, thinkingColor).apply {
+            val textArea = createWrappingTextArea(displayContent, claudeThinkingFg).apply {
                 font = UIUtil.getLabelFont().deriveFont(Font.ITALIC)
             }
             wrapper.add(textArea, BorderLayout.CENTER)
@@ -326,8 +342,7 @@ class DefaultAcpEventRenderer(
     }
 
     override fun getDebugState(): String {
-        return "DefaultRenderer[$agentKey](panels=${container.componentCount}, " +
-                "thinking=${currentThinkingPanel != null}, message=${currentMessagePanel != null})"
+        return "ClaudeCodeRenderer[$agentKey](panels=${container.componentCount})"
     }
 }
 

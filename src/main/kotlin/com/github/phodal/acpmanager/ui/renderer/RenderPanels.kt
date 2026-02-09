@@ -19,6 +19,12 @@ class StreamingPanel(
 
     private val textArea: JTextArea
 
+    override fun getPreferredSize(): Dimension {
+        val parentWidth = parent?.width ?: 400
+        val pref = super.getPreferredSize()
+        return Dimension(parentWidth, pref.height)
+    }
+
     init {
         isOpaque = true
         background = bgColor
@@ -35,7 +41,31 @@ class StreamingPanel(
         }
         wrapper.add(header, BorderLayout.NORTH)
 
-        textArea = JTextArea().apply {
+        textArea = object : JTextArea() {
+            override fun getPreferredSize(): Dimension {
+                val parentWidth = this@StreamingPanel.parent?.width ?: 400
+                val availableWidth = maxOf(100, parentWidth - 50)
+
+                val fm = getFontMetrics(font)
+                val lines = if (availableWidth > 0 && text.isNotEmpty()) {
+                    var lineCount = 0
+                    for (line in text.split("\n")) {
+                        if (line.isEmpty()) {
+                            lineCount++
+                        } else {
+                            val lineWidth = fm.stringWidth(line)
+                            lineCount += maxOf(1, (lineWidth + availableWidth - 1) / availableWidth)
+                        }
+                    }
+                    maxOf(1, lineCount)
+                } else {
+                    1
+                }
+
+                val height = lines * fm.height + 4
+                return Dimension(availableWidth, height)
+            }
+        }.apply {
             isEditable = false
             isOpaque = false
             lineWrap = true
