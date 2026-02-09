@@ -160,7 +160,8 @@ class AgentSession(
             workingDirectory = cwd,
             additionalArgs = config.args,
             envVars = config.env,
-            permissionMode = if (config.autoApprove) "bypassPermissions" else "acceptEdits"
+            permissionMode = if (config.autoApprove) "bypassPermissions" else "acceptEdits",
+            allowedTools = config.allowedTools
         )
 
         // Forward Claude Code events to our render events flow

@@ -46,6 +46,11 @@ class AgentConfigDialog(
 
     private val autoApproveCheckbox = JCheckBox("Auto-approve permissions", existingConfig?.autoApprove ?: false)
 
+    private val allowedToolsField = JBTextField(existingConfig?.allowedTools?.joinToString(", ") ?: "").apply {
+        columns = 30
+        toolTipText = "Comma-separated list of tools to auto-approve (e.g., Bash, Read, Edit, Write)"
+    }
+
     init {
         title = if (existingKey != null) "Edit Agent: $existingKey" else "Add New Agent"
         init()
@@ -59,6 +64,7 @@ class AgentConfigDialog(
             .addLabeledComponent(JBLabel("Description:"), descriptionField, 1, false)
             .addLabeledComponent(JBLabel("Environment (KEY=VALUE, one per line):"), JScrollPane(envField), 1, false)
             .addComponent(autoApproveCheckbox)
+            .addLabeledComponent(JBLabel("Allowed Tools (Claude Code only):"), allowedToolsField, 1, false)
             .addComponentFillVertically(JPanel(), 0)
             .panel
             .apply {
@@ -95,12 +101,18 @@ class AgentConfigDialog(
                 parts[0].trim() to parts.getOrElse(1) { "" }.trim()
             }
 
+        val allowedTools = allowedToolsField.text.trim()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
         return AcpAgentConfig(
             command = commandField.text.trim(),
             args = args,
             env = env,
             description = descriptionField.text.trim(),
             autoApprove = autoApproveCheckbox.isSelected,
+            allowedTools = allowedTools,
         )
     }
 }

@@ -155,6 +155,7 @@ class AcpConfigService(private val project: Project) {
                 } ?: emptyMap(),
                 description = v["description"] as? String ?: "",
                 autoApprove = v["autoApprove"] as? Boolean ?: false,
+                allowedTools = (v["allowedTools"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
             )
         }
     }
@@ -239,6 +240,7 @@ class AcpConfigService(private val project: Project) {
                     if (agent.env.isNotEmpty()) put("env", agent.env)
                     if (agent.description.isNotEmpty()) put("description", agent.description)
                     if (agent.autoApprove) put("autoApprove", true)
+                    if (agent.allowedTools.isNotEmpty()) put("allowedTools", agent.allowedTools)
                 }
             }
             if (agentsData.isNotEmpty()) {

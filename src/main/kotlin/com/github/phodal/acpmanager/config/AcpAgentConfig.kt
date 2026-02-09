@@ -30,6 +30,13 @@ data class AcpAgentConfig(
      * Claude Code uses stream-json mode instead of standard ACP protocol.
      */
     val nonStandardApi: Boolean = false,
+    /**
+     * List of tools to auto-approve for Claude Code.
+     * Uses Claude Code's permission rule syntax, e.g., "Bash", "Read", "Edit", "Bash(git *)".
+     * When set, these tools will be auto-approved without prompting.
+     * Only applicable when using Claude Code (stream-json mode).
+     */
+    val allowedTools: List<String> = emptyList(),
 ) {
     fun getCommandLine(): List<String> {
         return mutableListOf(command).apply { addAll(args) }

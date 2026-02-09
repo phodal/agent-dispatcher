@@ -27,6 +27,7 @@ class ClaudeCodeClient(
     private val permissionMode: String? = null,
     private val additionalArgs: List<String> = emptyList(),
     private val envVars: Map<String, String> = emptyMap(),
+    private val allowedTools: List<String> = emptyList(),
 ) {
     private var process: Process? = null
     private var writer: BufferedWriter? = null
@@ -61,6 +62,12 @@ class ClaudeCodeClient(
         val effectivePermissionMode = permissionMode ?: "acceptEdits"
         cmd.addAll(listOf("--permission-mode", effectivePermissionMode))
         cmd.addAll(listOf("--disallowed-tools", "AskUserQuestion"))
+
+        // Add allowed tools for auto-approval
+        if (allowedTools.isNotEmpty()) {
+            cmd.addAll(listOf("--allowedTools", allowedTools.joinToString(",")))
+        }
+
         cmd.addAll(additionalArgs)
 
         log.info("[ClaudeCode] Starting: ${cmd.joinToString(" ")}")
