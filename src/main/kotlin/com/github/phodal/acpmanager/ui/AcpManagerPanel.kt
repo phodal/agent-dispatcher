@@ -4,6 +4,7 @@ import com.github.phodal.acpmanager.acp.AcpSessionManager
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -21,12 +22,19 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
 
+private val log = logger<AcpManagerPanel>()
+
 /**
- * Simplified main panel for ACP Manager.
+ * Main panel for ACP Manager.
  *
  * UI layout:
  * - Center: Tabbed chat panels for each agent session
- * - Bottom (in each chat panel): Agent selection and config button
+ * - Bottom (in welcome tab): Agent selection and input area
+ *
+ * Features:
+ * - Agent selector with colored status indicators (green/yellow/red/gray)
+ * - Automatic connection when sending first message
+ * - Status refresh timer for connection indicators
  */
 class AcpManagerPanel(
     private val project: Project,
@@ -38,18 +46,33 @@ class AcpManagerPanel(
 
     private val tabbedPane = JTabbedPane(JTabbedPane.TOP)
     private val chatPanels = mutableMapOf<String, ChatPanel>()
-    private val emptyPanel = createEmptyPanel()
+    private val emptyPanel: JPanel
+
+    // Track the selected agent key in the welcome panel
+    @Volatile
+    private var selectedAgentKey: String? = null
+    private var welcomeToolbar: ChatInputToolbar? = null
+
+    // Status refresh timer
+    private var statusRefreshJob: Job? = null
 
     init {
-        // No toolbar - clean UI
+        emptyPanel = createEmptyPanel()
         setContent(tabbedPane)
         tabbedPane.addTab("Welcome", emptyPanel)
 
         // Load config and auto-detect agents
         configService.reloadConfig()
 
+        // Set initial selected agent
+        val config = configService.loadConfig()
+        selectedAgentKey = config.activeAgent ?: config.agents.keys.firstOrNull()
+
         // Watch session changes
         startSessionObserver()
+
+        // Start periodic status refresh
+        startStatusRefresh()
     }
 
     private fun createEmptyPanel(): JPanel {
@@ -70,10 +93,10 @@ class AcpManagerPanel(
 
                 gbc.gridy = 1
                 gbc.insets = Insets(12, 0, 0, 0)
-                
+
                 val config = configService.loadConfig()
                 val agentCount = config.agents.size
-                
+
                 val subtitleLabel = JBLabel(
                     if (agentCount > 0) {
                         "Detected $agentCount agent(s) from PATH and config files"
@@ -87,16 +110,18 @@ class AcpManagerPanel(
 
                 gbc.gridy = 2
                 gbc.insets = Insets(24, 0, 0, 0)
-                val hintLabel = JBLabel("<html><center>" +
-                    "Select an agent below and type your message to start" +
-                    "</center></html>").apply {
+                val hintLabel = JBLabel(
+                    "<html><center>" +
+                            "Select an agent below and type your message to start" +
+                            "</center></html>"
+                ).apply {
                     foreground = UIUtil.getLabelDisabledForeground()
                     font = font.deriveFont(font.size2D - 0.5f)
                 }
                 add(hintLabel, gbc)
             }
             add(welcomeContent, BorderLayout.CENTER)
-            
+
             // Input area at bottom
             val inputArea = JBTextArea(4, 40).apply {
                 lineWrap = true
@@ -105,7 +130,7 @@ class AcpManagerPanel(
                 font = UIUtil.getLabelFont().deriveFont(14f)
                 emptyText.text = "Select an agent and type your message... (Enter to send)"
             }
-            
+
             inputArea.addKeyListener(object : KeyAdapter() {
                 override fun keyPressed(e: KeyEvent) {
                     if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
@@ -118,7 +143,7 @@ class AcpManagerPanel(
                     }
                 }
             })
-            
+
             val inputToolbar = ChatInputToolbar(
                 project = project,
                 onSendClick = {
@@ -132,31 +157,39 @@ class AcpManagerPanel(
             ).apply {
                 val config = configService.loadConfig()
                 setAgents(config.agents)
-                if (config.activeAgent != null) {
-                    setCurrentAgent(config.activeAgent)
+                val activeKey = config.activeAgent ?: config.agents.keys.firstOrNull()
+                if (activeKey != null) {
+                    setCurrentAgent(activeKey)
+                    selectedAgentKey = activeKey
                 }
-                setOnAgentSelect { selectedKey ->
-                    // Just update selection, don't connect yet
+                setOnAgentSelect { newKey ->
+                    selectedAgentKey = newKey
+                    log.info("Welcome panel: selected agent changed to '$newKey'")
                 }
                 setOnConfigureClick { showConfigDialog() }
             }
-            
+            welcomeToolbar = inputToolbar
+
             val inputPanel = JPanel(BorderLayout()).apply {
-                border = JBUI.Borders.customLineTop(com.intellij.ui.JBColor.border())
-                add(JBScrollPane(inputArea).apply {
-                    preferredSize = Dimension(0, JBUI.scale(100))
-                    border = JBUI.Borders.empty(4, 8)
-                }, BorderLayout.CENTER)
+                border = JBUI.Borders.customLineTop(JBColor.border())
+                add(
+                    JBScrollPane(inputArea).apply {
+                        preferredSize = Dimension(0, JBUI.scale(100))
+                        border = JBUI.Borders.empty(4, 8)
+                    }, BorderLayout.CENTER
+                )
                 add(inputToolbar, BorderLayout.SOUTH)
             }
             add(inputPanel, BorderLayout.SOUTH)
         }
     }
-    
+
     private fun startFirstSession(initialMessage: String) {
-        val config = configService.loadConfig()
-        val agentKey = config.activeAgent ?: config.agents.keys.firstOrNull()
-        
+        // Use the agent selected in the dropdown, not just from config
+        val agentKey = selectedAgentKey
+            ?: welcomeToolbar?.getSelectedAgentKey()
+            ?: configService.loadConfig().let { it.activeAgent ?: it.agents.keys.firstOrNull() }
+
         if (agentKey == null) {
             Messages.showWarningDialog(
                 project,
@@ -165,21 +198,32 @@ class AcpManagerPanel(
             )
             return
         }
-        
-        // Connect the agent
+
+        log.info("Starting first session with agent '$agentKey', message: '${initialMessage.take(50)}...'")
+
+        // Update status to connecting
+        welcomeToolbar?.updateAgentStatus(agentKey, AgentConnectionStatus.CONNECTING)
+
         scope.launch(Dispatchers.IO) {
             try {
-                sessionManager.connectAgent(agentKey)
-                // Wait a bit for the UI to update
-                delay(100)
-                // Send the initial message
-                val session = sessionManager.getSession(agentKey)
-                session?.sendMessage(initialMessage)
-            } catch (e: Exception) {
+                // Connect the agent
+                val session = sessionManager.connectAgent(agentKey)
+
+                // Update status to connected
                 ApplicationManager.getApplication().invokeLater {
+                    welcomeToolbar?.updateAgentStatus(agentKey, AgentConnectionStatus.CONNECTED)
+                }
+
+                // Send the initial message directly - no delay needed since we have the session
+                log.info("Agent '$agentKey' connected, sending initial message")
+                session.sendMessage(initialMessage)
+            } catch (e: Exception) {
+                log.warn("Failed to start session with agent '$agentKey'", e)
+                ApplicationManager.getApplication().invokeLater {
+                    welcomeToolbar?.updateAgentStatus(agentKey, AgentConnectionStatus.ERROR)
                     Messages.showErrorDialog(
                         project,
-                        "Failed to start session: ${e.message}",
+                        "Failed to start session with '$agentKey': ${e.message}",
                         "Connection Error"
                     )
                 }
@@ -192,6 +236,23 @@ class AcpManagerPanel(
             sessionManager.sessionKeys.collectLatest { keys ->
                 ApplicationManager.getApplication().invokeLater {
                     updateUI(keys)
+                }
+            }
+        }
+    }
+
+    /**
+     * Start a periodic job to refresh agent connection statuses.
+     */
+    private fun startStatusRefresh() {
+        statusRefreshJob = scope.launch {
+            while (isActive) {
+                delay(3000) // Refresh every 3 seconds
+                ApplicationManager.getApplication().invokeLater {
+                    welcomeToolbar?.refreshAllStatuses()
+                    chatPanels.values.forEach { panel ->
+                        // Each chat panel's toolbar also gets refreshed
+                    }
                 }
             }
         }
@@ -217,11 +278,11 @@ class AcpManagerPanel(
             if (!chatPanels.containsKey(key)) {
                 // Get or create session
                 val session = sessionManager.getOrCreateSession(key)
-                
+
                 // Create new chat panel
                 val chatPanel = ChatPanel(project, session)
                 chatPanels[key] = chatPanel
-                
+
                 // Configure the input toolbar
                 val config = configService.loadConfig()
                 chatPanel.updateInputToolbar(
@@ -251,8 +312,9 @@ class AcpManagerPanel(
                     tabbedPane.removeTabAt(0)
                 }
 
-                // Add new tab
-                tabbedPane.addTab(key, chatPanel)
+                // Get display name from config
+                val displayName = config.agents[key]?.description?.ifBlank { key } ?: key
+                tabbedPane.addTab(displayName, chatPanel)
                 tabbedPane.selectedComponent = chatPanel
             }
         }
@@ -277,19 +339,27 @@ class AcpManagerPanel(
                 appendLine("3. ~/.acp-manager/config.yaml")
             } else {
                 config.agents.forEach { (key, agent) ->
-                    appendLine("• $key: ${agent.command} ${agent.args.joinToString(" ")}")
+                    val status = welcomeToolbar?.agentSelector?.getAgentStatus(key)
+                        ?: AgentConnectionStatus.DISCONNECTED
+                    val statusIcon = when (status) {
+                        AgentConnectionStatus.CONNECTED -> "[OK]"
+                        AgentConnectionStatus.CONNECTING -> "[...]"
+                        AgentConnectionStatus.ERROR -> "[ERR]"
+                        AgentConnectionStatus.DISCONNECTED -> "[ ]"
+                    }
+                    appendLine("$statusIcon $key: ${agent.command} ${agent.args.joinToString(" ")}")
                 }
                 appendLine()
                 appendLine("Sources:")
-                appendLine("• Auto-detected from PATH")
-                appendLine("• ~/.autodev/config.yaml")
-                appendLine("• ~/.acp-manager/config.yaml")
+                appendLine("  Auto-detected from PATH")
+                appendLine("  ~/.autodev/config.yaml")
+                appendLine("  ~/.acp-manager/config.yaml")
             }
             appendLine()
             appendLine("To add custom agents, edit:")
             appendLine(configService.getGlobalConfigFile().absolutePath)
         }
-        
+
         Messages.showInfoMessage(
             project,
             message,
@@ -298,6 +368,7 @@ class AcpManagerPanel(
     }
 
     override fun dispose() {
+        statusRefreshJob?.cancel()
         scope.cancel()
         chatPanels.values.forEach { it.dispose() }
         chatPanels.clear()

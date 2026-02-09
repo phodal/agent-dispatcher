@@ -13,6 +13,11 @@ data class AcpAgentPreset(
     val command: String,
     val args: List<String>,
     val description: String,
+    /**
+     * Whether this agent uses a non-standard ACP API.
+     * Claude Code natively supports ACP without needing an --acp flag.
+     */
+    val nonStandardApi: Boolean = false,
 ) {
     fun toConfig(): AcpAgentConfig = AcpAgentConfig(
         command = command,
@@ -54,7 +59,8 @@ object AcpAgentPresets {
             name = "Claude Code",
             command = "claude",
             args = emptyList(),
-            description = "Anthropic Claude Code"
+            description = "Anthropic Claude Code (native ACP support)",
+            nonStandardApi = true,
         ),
         AcpAgentPreset(
             id = "codex",

@@ -7,6 +7,7 @@ import com.github.phodal.acpmanager.acp.MessageRole
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
@@ -21,10 +22,13 @@ import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
 
+private val log = logger<ChatPanel>()
+
 /**
  * Chat panel for a single ACP agent session.
  *
  * Displays the conversation timeline and provides input for sending messages.
+ * Updates agent connection status in the toolbar selector.
  */
 class ChatPanel(
     private val project: Project,
@@ -78,16 +82,16 @@ class ChatPanel(
             onStopClick = { cancelMessage() }
         )
 
-        // Input panel layout - similar to xiuper
+        // Input panel layout
         val inputPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.customLineTop(JBColor.border())
-            
+
             // Text input in center
             add(JBScrollPane(inputArea).apply {
                 preferredSize = Dimension(0, JBUI.scale(100))
                 border = JBUI.Borders.empty(4, 8)
             }, BorderLayout.CENTER)
-            
+
             // Toolbar at bottom
             add(inputToolbar, BorderLayout.SOUTH)
         }
@@ -115,11 +119,20 @@ class ChatPanel(
         inputToolbar.setSendEnabled(!state.isProcessing && state.isConnected)
         inputArea.isEnabled = !state.isProcessing && state.isConnected
 
-        // Update status
+        // Update connection status in the selector
+        val connectionStatus = when {
+            state.error != null -> AgentConnectionStatus.ERROR
+            state.isConnected -> AgentConnectionStatus.CONNECTED
+            else -> AgentConnectionStatus.DISCONNECTED
+        }
+        inputToolbar.updateAgentStatus(session.agentKey, connectionStatus)
+
+        // Update status text
         val statusText = when {
+            state.error != null -> "Error: ${state.error}"
             !state.isConnected -> "Disconnected"
             state.isProcessing -> "Processing..."
-            else -> ""
+            else -> "Connected"
         }
         inputToolbar.setStatusText(statusText)
 
@@ -227,8 +240,24 @@ class ChatPanel(
 
         scope.launch(Dispatchers.IO) {
             try {
+                // Ensure connected before sending
+                if (!session.isConnected) {
+                    log.info("Session '${session.agentKey}' not connected, attempting to connect first")
+                    val configService = AcpConfigService.getInstance(project)
+                    val config = configService.getAgentConfig(session.agentKey)
+                    if (config != null) {
+                        session.connect(config)
+                    } else {
+                        ApplicationManager.getApplication().invokeLater {
+                            inputToolbar.setStatusText("Error: Agent config not found")
+                        }
+                        return@launch
+                    }
+                }
+
                 session.sendMessage(text)
             } catch (e: Exception) {
+                log.warn("Failed to send message to '${session.agentKey}'", e)
                 ApplicationManager.getApplication().invokeLater {
                     inputToolbar.setStatusText("Error: ${e.message}")
                 }
@@ -255,6 +284,14 @@ class ChatPanel(
         inputToolbar.setCurrentAgent(currentAgentKey)
         inputToolbar.setOnAgentSelect(onAgentSelect)
         inputToolbar.setOnConfigureClick(onConfigureClick)
+
+        // Set initial status for the current agent
+        if (currentAgentKey != null && session.isConnected) {
+            inputToolbar.updateAgentStatus(currentAgentKey, AgentConnectionStatus.CONNECTED)
+        }
+
+        // Refresh all statuses
+        inputToolbar.refreshAllStatuses()
     }
 
     override fun dispose() {
