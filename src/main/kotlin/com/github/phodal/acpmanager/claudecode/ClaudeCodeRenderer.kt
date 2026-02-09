@@ -41,13 +41,14 @@ class ClaudeCodeRenderer(
     }
 
     // Streaming state
-    private var currentThinkingPanel: CollapsibleThinkingPanel? = null
-    private var currentMessagePanel: CompactStreamingPanel? = null
+    private var currentThinkingPanel: SimpleStreamingPanel? = null
+    private var currentMessagePanel: SimpleStreamingPanel? = null
     private val thinkingBuffer = StringBuilder()
     private val messageBuffer = StringBuilder()
+    private var currentThinkingSignature: String? = null
 
     // Tool call tracking
-    private val toolCallPanels = mutableMapOf<String, CompactToolCallPanel>()
+    private val toolCallPanels = mutableMapOf<String, SimpleToolCallPanel>()
 
     // Task tracking - for Task tool calls
     private val tasks = mutableListOf<TaskInfo>()
@@ -68,12 +69,14 @@ class ClaudeCodeRenderer(
             is RenderEvent.ThinkingStart -> startThinking()
             is RenderEvent.ThinkingChunk -> appendThinking(event.content)
             is RenderEvent.ThinkingEnd -> endThinking(event.fullContent)
+            is RenderEvent.ThinkingSignature -> onThinkingSignature(event.signature)
             is RenderEvent.MessageStart -> startMessage()
             is RenderEvent.MessageChunk -> appendMessage(event.content)
             is RenderEvent.MessageEnd -> endMessage(event.fullContent)
             is RenderEvent.ToolCallStart -> startToolCall(event)
             is RenderEvent.ToolCallUpdate -> updateToolCall(event)
             is RenderEvent.ToolCallEnd -> endToolCall(event)
+            is RenderEvent.ToolCallParameterUpdate -> updateToolCallParameters(event)
             is RenderEvent.PlanUpdate -> addPlanUpdate(event)
             is RenderEvent.ModeChange -> { /* ignore */ }
             is RenderEvent.Info -> addInfo(event)
@@ -92,7 +95,8 @@ class ClaudeCodeRenderer(
 
     private fun startThinking() {
         thinkingBuffer.clear()
-        val panel = CollapsibleThinkingPanel()
+        currentThinkingSignature = null
+        val panel = SimpleStreamingPanel("💡 Thinking", thinkingFg)
         currentThinkingPanel = panel
         addPanel(panel)
         scrollToContentBottom()
@@ -104,15 +108,20 @@ class ClaudeCodeRenderer(
     }
 
     private fun endThinking(fullContent: String) {
-        currentThinkingPanel?.finalize(fullContent)
+        currentThinkingPanel?.finalize(fullContent, currentThinkingSignature)
         currentThinkingPanel = null
         thinkingBuffer.clear()
+        currentThinkingSignature = null
         scrollToContentBottom()
+    }
+
+    private fun onThinkingSignature(signature: String) {
+        currentThinkingSignature = signature
     }
 
     private fun startMessage() {
         messageBuffer.clear()
-        val panel = CompactStreamingPanel("Assistant", messageFg)
+        val panel = SimpleStreamingPanel("Assistant", messageFg)
         currentMessagePanel = panel
         addPanel(panel)
         scrollToContentBottom()
@@ -125,7 +134,7 @@ class ClaudeCodeRenderer(
     }
 
     private fun endMessage(fullContent: String) {
-        currentMessagePanel?.finalize(fullContent)
+        currentMessagePanel?.finalize(fullContent, null)
         currentMessagePanel = null
         messageBuffer.clear()
         scrollToContentBottom()
@@ -147,7 +156,7 @@ class ClaudeCodeRenderer(
             updateTaskSummary()
         } else {
             // Regular tool call
-            val panel = CompactToolCallPanel(event.toolName, event.title ?: event.toolName)
+            val panel = SimpleToolCallPanel(event.toolName, event.title ?: event.toolName)
             toolCallPanels[event.toolCallId] = panel
             addPanel(panel)
         }
@@ -166,6 +175,10 @@ class ClaudeCodeRenderer(
         } else {
             toolCallPanels[event.toolCallId]?.updateStatus(event.status, event.title)
         }
+    }
+
+    private fun updateToolCallParameters(event: RenderEvent.ToolCallParameterUpdate) {
+        toolCallPanels[event.toolCallId]?.updateParameters(event.partialParameters)
     }
 
     private fun endToolCall(event: RenderEvent.ToolCallEnd) {
@@ -280,109 +293,19 @@ class ClaudeCodeRenderer(
     }
 
     /**
-     * Collapsible thinking panel - shows 2 lines by default, expandable on click.
-     * Uses BoxLayout for proper vertical sizing.
+     * Simple streaming panel - no collapsing, just shows content as it streams.
      */
-    inner class CollapsibleThinkingPanel : JPanel() {
-        private val headerLabel: JBLabel
-        private val contentLabel: JBLabel
-        private var fullContent: String = ""
-        private var isExpanded = false
-        private val maxCollapsedChars = 100
-
-        init {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 8)
-
-            headerLabel = JBLabel("💡 Thinking...").apply {
-                foreground = thinkingFg
-                font = font.deriveFont(Font.ITALIC, font.size2D - 2)
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                alignmentX = Component.LEFT_ALIGNMENT
-            }
-
-            contentLabel = JBLabel().apply {
-                foreground = thinkingFg
-                font = font.deriveFont(Font.ITALIC, font.size2D - 2)
-                border = JBUI.Borders.emptyLeft(16)
-                alignmentX = Component.LEFT_ALIGNMENT
-            }
-
-            add(headerLabel)
-            add(contentLabel)
-
-            // Click to expand/collapse
-            val clickListener = object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    isExpanded = !isExpanded
-                    updateDisplay()
-                    // Update parent layout
-                    parent?.revalidate()
-                    parent?.repaint()
-                }
-            }
-            headerLabel.addMouseListener(clickListener)
-            contentLabel.addMouseListener(clickListener)
-        }
-
-        override fun getMaximumSize(): Dimension {
-            val pref = preferredSize
-            return Dimension(Int.MAX_VALUE, pref.height)
-        }
-
-        fun updateContent(content: String) {
-            fullContent = content
-            updateDisplay()
-        }
-
-        fun finalize(content: String) {
-            fullContent = content
-            updateDisplay()
-        }
-
-        private fun updateDisplay() {
-            val displayText = if (isExpanded) {
-                fullContent.take(2000) // Limit expanded content
-            } else {
-                if (fullContent.length > maxCollapsedChars) {
-                    fullContent.take(maxCollapsedChars).replace("\n", " ") + "..."
-                } else {
-                    fullContent.replace("\n", " ")
-                }
-            }
-
-            contentLabel.text = if (displayText.isNotEmpty()) {
-                "<html><div style='width:500px'>$displayText</div></html>"
-            } else {
-                ""
-            }
-            contentLabel.isVisible = displayText.isNotEmpty()
-
-            headerLabel.text = if (fullContent.isNotEmpty()) {
-                "💡 Thinking ${if (isExpanded) "▼" else "▶"}"
-            } else {
-                "💡 Thinking..."
-            }
-            revalidate()
-            repaint()
-        }
-    }
-
-    /**
-     * Compact streaming panel for assistant messages.
-     * Uses BoxLayout for proper vertical sizing.
-     */
-    inner class CompactStreamingPanel(private val name: String, private val headerColor: Color) : JPanel() {
+    inner class SimpleStreamingPanel(private val name: String, private val headerColor: Color) : JPanel() {
         private val headerLabel: JBLabel
         private val contentArea: JTextArea
+        private val signatureLabel: JBLabel
 
         init {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
             border = JBUI.Borders.empty(4, 8)
 
-            headerLabel = JBLabel("$name (typing...)").apply {
+            headerLabel = JBLabel("$name (streaming...)").apply {
                 foreground = headerColor
                 font = font.deriveFont(Font.BOLD)
                 alignmentX = Component.LEFT_ALIGNMENT
@@ -400,6 +323,15 @@ class ClaudeCodeRenderer(
                 alignmentX = Component.LEFT_ALIGNMENT
             }
             add(contentArea)
+
+            signatureLabel = JBLabel().apply {
+                foreground = UIUtil.getLabelDisabledForeground()
+                font = font.deriveFont(font.size2D - 2)
+                border = JBUI.Borders.emptyTop(2)
+                alignmentX = Component.LEFT_ALIGNMENT
+                isVisible = false
+            }
+            add(signatureLabel)
         }
 
         override fun getMaximumSize(): Dimension {
@@ -414,9 +346,13 @@ class ClaudeCodeRenderer(
             parent?.revalidate()
         }
 
-        fun finalize(content: String) {
+        fun finalize(content: String, signature: String?) {
             headerLabel.text = name
             contentArea.text = content
+            signature?.let {
+                signatureLabel.text = "✓ Verified (${it.take(8)}...)"
+                signatureLabel.isVisible = true
+            }
             revalidate()
             repaint()
             parent?.revalidate()
@@ -424,57 +360,81 @@ class ClaudeCodeRenderer(
     }
 
     /**
-     * Compact tool call panel - single line with status icon.
-     * Uses BorderLayout for proper sizing.
+     * Simple tool call panel - shows tool name, parameters, and status.
      */
-    inner class CompactToolCallPanel(
+    inner class SimpleToolCallPanel(
         private val toolName: String,
         private var title: String
-    ) : JPanel(BorderLayout()) {
+    ) : JPanel() {
         private val statusIcon: JBLabel
         private val titleLabel: JBLabel
+        private val parametersArea: JTextArea
         private var isCompleted = false
 
         init {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
-            border = JBUI.Borders.empty(1, 8)
+            border = JBUI.Borders.empty(2, 8)
 
-            val linePanel = JPanel(BorderLayout(4, 0)).apply {
+            // Header line with status icon and title
+            val headerPanel = JPanel(BorderLayout(4, 0)).apply {
                 isOpaque = false
+                alignmentX = Component.LEFT_ALIGNMENT
             }
 
             statusIcon = JBLabel("▶").apply {
                 foreground = toolFg
                 font = font.deriveFont(Font.BOLD)
             }
-            linePanel.add(statusIcon, BorderLayout.WEST)
+            headerPanel.add(statusIcon, BorderLayout.WEST)
 
-            titleLabel = JBLabel("Tool: $title").apply {
+            titleLabel = JBLabel("🔧 $title").apply {
                 foreground = toolFg
-                font = font.deriveFont(font.size2D - 1)
+                font = font.deriveFont(Font.BOLD, font.size2D - 1)
             }
-            linePanel.add(titleLabel, BorderLayout.CENTER)
+            headerPanel.add(titleLabel, BorderLayout.CENTER)
 
-            add(linePanel, BorderLayout.WEST)
-        }
+            add(headerPanel)
 
-        override fun getPreferredSize(): Dimension {
-            val pref = super.getPreferredSize()
-            return Dimension(pref.width, minOf(pref.height, JBUI.scale(24)))
+            // Parameters area (initially hidden)
+            parametersArea = JTextArea().apply {
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                font = UIUtil.getLabelFont().deriveFont(font.size2D - 1)
+                foreground = UIUtil.getLabelDisabledForeground()
+                border = JBUI.Borders.emptyLeft(20)
+                alignmentX = Component.LEFT_ALIGNMENT
+                isVisible = false
+            }
+            add(parametersArea)
         }
 
         override fun getMaximumSize(): Dimension {
-            return Dimension(Int.MAX_VALUE, preferredSize.height)
+            val pref = preferredSize
+            return Dimension(Int.MAX_VALUE, pref.height)
         }
 
         fun updateStatus(status: ToolCallStatus, newTitle: String?) {
             if (isCompleted) return
-            newTitle?.let { title = it; titleLabel.text = "Tool: $it" }
+            newTitle?.let { title = it; titleLabel.text = "🔧 $it" }
             statusIcon.text = when (status) {
                 ToolCallStatus.IN_PROGRESS -> "▶"
                 ToolCallStatus.PENDING -> "○"
                 else -> "■"
             }
+            revalidate()
+            repaint()
+        }
+
+        fun updateParameters(partialParams: String) {
+            if (isCompleted) return
+            parametersArea.text = partialParams.take(200) // Limit display
+            parametersArea.isVisible = partialParams.isNotEmpty()
+            revalidate()
+            repaint()
+            parent?.revalidate()
         }
 
         fun complete(status: ToolCallStatus, output: String?) {
@@ -487,6 +447,10 @@ class ClaudeCodeRenderer(
             statusIcon.text = icon
             statusIcon.foreground = color
             titleLabel.foreground = color
+            // Hide parameters on completion to keep UI clean
+            parametersArea.isVisible = false
+            revalidate()
+            repaint()
         }
     }
 

@@ -36,6 +36,7 @@ class ClaudeCodeClient(
     private val toolUseNames = mutableMapOf<String, String>()
     private val renderedToolIds = mutableSetOf<String>()
     private val toolUseInputs = mutableMapOf<String, Map<String, Any>>()
+    private val toolParameterBuffers = mutableMapOf<String, StringBuilder>()
 
     private val _renderEvents = MutableSharedFlow<RenderEvent>(
         replay = 0,
@@ -277,6 +278,24 @@ class ClaudeCodeClient(
                             setHasRendered(true)
                             messageBuffer.append(it)
                             emitEvent(RenderEvent.MessageChunk(it))
+                        }
+                    }
+                    "input_json_delta" -> {
+                        delta.partialJson?.let { partialJson ->
+                            setHasRendered(true)
+                            val index = event.index ?: return
+                            val toolId = "tool_$index"
+                            val buffer = toolParameterBuffers.getOrPut(toolId) { StringBuilder() }
+                            buffer.append(partialJson)
+                            emitEvent(RenderEvent.ToolCallParameterUpdate(
+                                toolCallId = toolId,
+                                partialParameters = buffer.toString()
+                            ))
+                        }
+                    }
+                    "signature_delta" -> {
+                        delta.signature?.let { signature ->
+                            emitEvent(RenderEvent.ThinkingSignature(signature))
                         }
                     }
                 }

@@ -65,6 +65,7 @@ data class ClaudeStreamDelta(
     val text: String? = null,
     val thinking: String? = null,
     @SerialName("partial_json") val partialJson: String? = null,
+    val signature: String? = null,
 )
 
 @Serializable

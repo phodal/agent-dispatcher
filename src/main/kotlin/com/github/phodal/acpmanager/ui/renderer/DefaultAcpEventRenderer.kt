@@ -49,11 +49,13 @@ class DefaultAcpEventRenderer(
             is RenderEvent.ThinkingStart -> startThinking()
             is RenderEvent.ThinkingChunk -> appendThinking(event.content)
             is RenderEvent.ThinkingEnd -> endThinking(event.fullContent)
+            is RenderEvent.ThinkingSignature -> { /* Signature verification - can be logged or ignored */ }
             is RenderEvent.MessageStart -> startMessage()
             is RenderEvent.MessageChunk -> appendMessage(event.content)
             is RenderEvent.MessageEnd -> endMessage(event.fullContent)
             is RenderEvent.ToolCallStart -> startToolCall(event)
             is RenderEvent.ToolCallUpdate -> updateToolCall(event)
+            is RenderEvent.ToolCallParameterUpdate -> { /* Parameter streaming - can be logged or ignored */ }
             is RenderEvent.ToolCallEnd -> endToolCall(event)
             is RenderEvent.PlanUpdate -> addPlanUpdate(event)
             is RenderEvent.ModeChange -> addInfo("Mode: ${event.modeId}", event.timestamp)
@@ -272,13 +274,7 @@ class DefaultAcpEventRenderer(
     }
 
     private fun createThinkingPanel(content: String): JPanel {
-        return object : JPanel(BorderLayout()) {
-            override fun getPreferredSize(): Dimension {
-                val parentWidth = parent?.width ?: 400
-                val pref = super.getPreferredSize()
-                return Dimension(parentWidth, pref.height)
-            }
-        }.apply {
+        return JPanel(BorderLayout()).apply {
             isOpaque = true
             background = JBColor(Color(0xF3E5F5), Color(0x2A1A2E))
             border = JBUI.Borders.empty(4, 8)

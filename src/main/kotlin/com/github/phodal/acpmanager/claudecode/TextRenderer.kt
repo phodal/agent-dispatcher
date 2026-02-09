@@ -50,6 +50,7 @@ class TextRenderer(
                 thinkingBuffer.clear()
                 "[THINKING] $content${if (event.fullContent.length > 200) "..." else ""}"
             }
+            is RenderEvent.ThinkingSignature -> "[THINKING:SIGNATURE] ${event.signature.take(16)}..."
             is RenderEvent.MessageStart -> {
                 messageBuffer.clear()
                 ""
@@ -65,6 +66,10 @@ class TextRenderer(
             }
             is RenderEvent.ToolCallStart -> "[TOOL:START] ${event.toolName}: ${event.title ?: ""}"
             is RenderEvent.ToolCallUpdate -> "[TOOL:UPDATE] ${event.toolCallId}: ${event.status}"
+            is RenderEvent.ToolCallParameterUpdate -> {
+                val params = event.partialParameters.take(100)
+                "[TOOL:PARAMS] ${event.toolCallId}: $params${if (event.partialParameters.length > 100) "..." else ""}"
+            }
             is RenderEvent.ToolCallEnd -> {
                 val output = event.output?.take(100) ?: ""
                 "[TOOL:END] ${event.toolCallId}: ${event.status} - $output"

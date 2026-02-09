@@ -96,6 +96,23 @@ sealed class RenderEvent {
     ) : RenderEvent()
 
     /**
+     * Tool call parameters streaming update.
+     */
+    data class ToolCallParameterUpdate(
+        val toolCallId: String,
+        val partialParameters: String,
+        override val timestamp: Long = System.currentTimeMillis(),
+    ) : RenderEvent()
+
+    /**
+     * Thinking content signature for verification.
+     */
+    data class ThinkingSignature(
+        val signature: String,
+        override val timestamp: Long = System.currentTimeMillis(),
+    ) : RenderEvent()
+
+    /**
      * Plan update from agent.
      */
     data class PlanUpdate(
