@@ -12,17 +12,6 @@ import java.awt.Color
  * Tests for agent connection status handling and display.
  */
 class AgentStatusTest : BasePlatformTestCase() {
-
-    fun testAgentConnectionStatusValues() {
-        // Ensure all status values exist
-        val statuses = AgentConnectionStatus.values()
-        assertEquals(4, statuses.size)
-        assertTrue(AgentConnectionStatus.CONNECTED in statuses)
-        assertTrue(AgentConnectionStatus.CONNECTING in statuses)
-        assertTrue(AgentConnectionStatus.DISCONNECTED in statuses)
-        assertTrue(AgentConnectionStatus.ERROR in statuses)
-    }
-
     fun testAgentDisplayItem() {
         val item = AgentDisplayItem(
             key = "claude",

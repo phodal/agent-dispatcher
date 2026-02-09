@@ -343,46 +343,17 @@ class AcpManagerPanel(
     }
 
     private fun showConfigDialog() {
-        val config = configService.loadConfig()
-        val message = buildString {
-            appendLine("Detected ${config.agents.size} ACP Agent(s):")
-            appendLine()
-            if (config.agents.isEmpty()) {
-                appendLine("No agents found.")
-                appendLine()
-                appendLine("Agents are auto-detected from:")
-                appendLine("1. System PATH (common CLIs)")
-                appendLine("2. ~/.autodev/config.yaml")
-                appendLine("3. ~/.acp-manager/config.yaml")
-            } else {
-                config.agents.forEach { (key, agent) ->
-                    val status = welcomeToolbar?.agentSelector?.getAgentStatus(key)
-                        ?: AgentConnectionStatus.DISCONNECTED
-                    val statusIcon = when (status) {
-                        AgentConnectionStatus.CONNECTED -> "[OK]"
-                        AgentConnectionStatus.CONNECTING -> "[...]"
-                        AgentConnectionStatus.ERROR -> "[ERR]"
-                        AgentConnectionStatus.DISCONNECTED -> "[ ]"
-                        AgentConnectionStatus.UNAVAILABLE -> "[N/A]"
-                    }
-                    appendLine("$statusIcon $key: ${agent.command} ${agent.args.joinToString(" ")}")
-                }
-                appendLine()
-                appendLine("Sources:")
-                appendLine("  Auto-detected from PATH")
-                appendLine("  ~/.autodev/config.yaml")
-                appendLine("  ~/.acp-manager/config.yaml")
-            }
-            appendLine()
-            appendLine("To add custom agents, edit:")
-            appendLine(configService.getGlobalConfigFile().absolutePath)
-        }
+        val dialog = AgentConfigDialog(project)
+        if (dialog.showAndGet()) {
+            // Reload config and update UI
+            configService.reloadConfig()
 
-        Messages.showInfoMessage(
-            project,
-            message,
-            "ACP Agent Configuration"
-        )
+            // Refresh agent selector if needed
+            welcomeToolbar?.let { toolbar ->
+                val config = configService.loadConfig()
+                toolbar.setAgents(config.agents)
+            }
+        }
     }
 
     override fun dispose() {
