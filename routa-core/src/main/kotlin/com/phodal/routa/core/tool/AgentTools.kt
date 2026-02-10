@@ -6,18 +6,20 @@ import com.phodal.routa.core.model.*
 import com.phodal.routa.core.store.AgentStore
 import com.phodal.routa.core.store.ConversationStore
 import com.phodal.routa.core.store.TaskStore
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.util.UUID
 
 /**
- * The 7 agent coordination tools that enable multi-agent collaboration.
+ * The 6 agent coordination tools that enable multi-agent collaboration.
  *
  * These tools are designed to be exposed via MCP (Model Context Protocol) so that
  * LLM-powered agents can call them during their conversation turns.
+ *
+ * Note: `wait_for_agent` is NOT implemented as an explicit tool — per the Intent by Augment
+ * implementation analysis, waiting is handled via event subscriptions internally, not as a
+ * user-facing tool.
  *
  * Mapping from Issue #21:
  * - list_agents() → [listAgents]
@@ -25,7 +27,6 @@ import java.util.UUID
  * - create_agent() → [createAgent]
  * - delegate() → [delegate]
  * - message_agent() → [messageAgent]
- * - wait_for_agent() → [waitForAgent]
  * - report_to_parent() → [reportToParent]
  */
 class AgentTools(
@@ -218,47 +219,6 @@ class AgentTools(
         return ToolResult.ok(
             """{"sent": true, "from": "${fromAgent.name}", "to": "${toAgent.name}"}"""
         )
-    }
-
-    /**
-     * Wait for an agent to complete its work.
-     *
-     * Blocks until the agent's status becomes COMPLETED or ERROR,
-     * or until the timeout is reached.
-     *
-     * @param agentId The agent to wait for.
-     * @param timeoutMs Maximum wait time in milliseconds (default: 5 minutes).
-     */
-    suspend fun waitForAgent(
-        agentId: String,
-        timeoutMs: Long = 300_000,
-    ): ToolResult {
-        val agent = agentStore.get(agentId)
-            ?: return ToolResult.fail("Agent not found: $agentId")
-
-        // If already completed, return immediately
-        if (agent.status == AgentStatus.COMPLETED || agent.status == AgentStatus.ERROR) {
-            return ToolResult.ok(
-                """{"agentId": "$agentId", "status": "${agent.status.name}", "waited": false}"""
-            )
-        }
-
-        // Wait for the status change event
-        return try {
-            withTimeout(timeoutMs) {
-                val event = eventBus.events.first { event ->
-                    event is AgentEvent.AgentStatusChanged &&
-                        event.agentId == agentId &&
-                        (event.newStatus == AgentStatus.COMPLETED || event.newStatus == AgentStatus.ERROR)
-                }
-                val finalStatus = (event as AgentEvent.AgentStatusChanged).newStatus
-                ToolResult.ok(
-                    """{"agentId": "$agentId", "status": "${finalStatus.name}", "waited": true}"""
-                )
-            }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            ToolResult.fail("Timeout waiting for agent $agentId after ${timeoutMs}ms")
-        }
     }
 
     /**

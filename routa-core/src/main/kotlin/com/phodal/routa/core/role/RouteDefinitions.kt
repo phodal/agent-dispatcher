@@ -76,10 +76,10 @@ object RouteDefinitions {
             |## Available Tools
             |- `list_agents()` — discover active agents
             |- `create_agent(name, role, workspaceId)` — create Crafter or Gate agents
-            |- `delegate(agentId, taskId)` — assign a task to an agent
-            |- `message_agent(toAgentId, message)` — send guidance to agents
-            |- `wait_for_agent(agentId)` — wait for agent to complete
+            |- `delegate_task(agentId, taskId)` — assign a task to an agent
+            |- `send_message_to_agent(toAgentId, message)` — send guidance to agents
             |- `read_agent_conversation(agentId)` — review agent's work
+            |- `report_to_parent(report)` — receive completion reports from child agents
         """.trimMargin(),
         roleReminder = "You NEVER edit files directly. You have no file editing tools. " +
             "Delegate ALL implementation to Crafter agents. " +
@@ -121,7 +121,7 @@ object RouteDefinitions {
             |## Available Tools
             |- `list_agents()` — discover sibling agents (for conflict avoidance)
             |- `read_agent_conversation(agentId)` — see what others did
-            |- `message_agent(toAgentId, message)` — notify Routa if blocked
+            |- `send_message_to_agent(toAgentId, message)` — notify Routa if blocked
             |- `report_to_parent(report)` — REQUIRED when done
             |
             |## Completion (REQUIRED)
@@ -162,7 +162,7 @@ object RouteDefinitions {
             |## Available Tools
             |- `list_agents()` — list all agents
             |- `read_agent_conversation(agentId)` — review Crafter's work
-            |- `message_agent(toAgentId, message)` — send fix requests to Crafters
+            |- `send_message_to_agent(toAgentId, message)` — send fix requests to Crafters
             |- `report_to_parent(report)` — REQUIRED: send verdict to Routa
             |
             |## Output Format (for each criterion)
