@@ -35,7 +35,13 @@ class FileMentionProvider(private val project: Project) : MentionProvider {
         val fileEditorManager = FileEditorManager.getInstance(project)
         val openFiles = fileEditorManager.openFiles
         for (file in openFiles) {
-            val matchResult = FuzzyMatcher.match(file.name, query)
+            // For empty query, show all open files
+            val matchResult = if (query.isEmpty()) {
+                FuzzyMatcher.MatchResult(true, 100)
+            } else {
+                FuzzyMatcher.match(file.name, query)
+            }
+
             if (matchResult.matched) {
                 val item = createMentionItem(file)
                 if (seen.add(item.insertText)) {

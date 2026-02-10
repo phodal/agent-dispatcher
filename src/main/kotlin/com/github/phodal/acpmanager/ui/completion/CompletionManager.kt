@@ -91,5 +91,58 @@ class CompletionManager(
         mentionHandler.closePopup()
         commandHandler.closePopup()
     }
+
+    /**
+     * Trigger @ mention completion manually.
+     * Inserts @ at the current caret position and shows the popup.
+     */
+    fun triggerMentionCompletion() {
+        println("CompletionManager: triggerMentionCompletion called")
+        log.info("CompletionManager: triggerMentionCompletion called")
+        val text = inputArea.text
+        val caretPos = inputArea.caretPosition
+        println("CompletionManager: text='$text', caretPos=$caretPos")
+
+        // Insert @ at caret position
+        val newText = text.substring(0, caretPos) + "@" + text.substring(caretPos)
+        inputArea.text = newText
+        inputArea.caretPosition = caretPos + 1
+        println("CompletionManager: Inserted @ at position $caretPos, new caret position: ${inputArea.caretPosition}")
+        log.info("CompletionManager: Inserted @ at position $caretPos, new caret position: ${inputArea.caretPosition}")
+
+        // Trigger text change to show popup
+        handleTextChange()
+    }
+
+    /**
+     * Trigger / command completion manually.
+     * Inserts / at the current caret position and shows the popup.
+     */
+    fun triggerCommandCompletion() {
+        log.info("CompletionManager: triggerCommandCompletion called")
+        val text = inputArea.text
+        val caretPos = inputArea.caretPosition
+
+        // Insert / at caret position (only if at start of line or after space)
+        val shouldInsert = caretPos == 0 || text.getOrNull(caretPos - 1)?.let { it == ' ' || it == '\n' } == true
+        if (shouldInsert) {
+            val newText = text.substring(0, caretPos) + "/" + text.substring(caretPos)
+            inputArea.text = newText
+            inputArea.caretPosition = caretPos + 1
+            log.info("CompletionManager: Inserted / at position $caretPos, new caret position: ${inputArea.caretPosition}")
+
+            // Trigger text change to show popup
+            handleTextChange()
+        } else {
+            // If not at valid position, insert at the beginning
+            val newText = "/" + text
+            inputArea.text = newText
+            inputArea.caretPosition = 1
+            log.info("CompletionManager: Inserted / at beginning, new caret position: 1")
+
+            // Trigger text change to show popup
+            handleTextChange()
+        }
+    }
 }
 

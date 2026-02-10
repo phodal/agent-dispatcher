@@ -26,16 +26,23 @@ class CommandCompletionHandler(
      * Handle text change in the input area.
      */
     fun handleTextChange(text: String, caretPos: Int) {
+        // Validate inputs
+        if (text.isEmpty() || caretPos < 0 || caretPos > text.length) {
+            closePopup()
+            return
+        }
+
         // Find the last / before the caret
         val lastSlashPos = text.lastIndexOf('/', caretPos - 1)
 
         // Check if we're in a command context (/ followed by word characters)
-        if (lastSlashPos >= 0 && lastSlashPos < caretPos) {
+        if (lastSlashPos >= 0 && lastSlashPos < caretPos && lastSlashPos + 1 <= text.length) {
             val afterSlash = text.substring(lastSlashPos + 1, caretPos)
 
             // Only show popup if we have / followed by word characters or nothing
             if (afterSlash.isEmpty() || afterSlash.all { it.isLetterOrDigit() || it == '_' }) {
                 commandStartPos = lastSlashPos
+                log.info("CommandCompletionHandler: Found command context, query='$afterSlash'")
                 showPopup(afterSlash)
                 return
             }
@@ -49,7 +56,9 @@ class CommandCompletionHandler(
      */
     private fun showPopup(query: String) {
         val commands = registry.getCommandsByQuery(query)
+        log.info("CommandCompletionHandler: Got ${commands.size} commands for query='$query'")
         if (commands.isEmpty()) {
+            log.info("CommandCompletionHandler: No commands, closing popup")
             closePopup()
             return
         }
@@ -63,18 +72,22 @@ class CommandCompletionHandler(
             closePopup()
         }
 
-        // Position popup below the caret
+        // Position popup below the / symbol (use screen coordinates)
         val caretPos = inputArea.caretPosition
-        val caretCoords = inputArea.modelToView(caretPos)
-        if (caretCoords != null) {
-            val popupLocation = SwingUtilities.convertPoint(
-                inputArea,
-                caretCoords.x,
-                caretCoords.y + caretCoords.height,
-                inputArea.parent
-            )
-            popup.show(inputArea.parent, popupLocation.x, popupLocation.y)
+        val rect = try {
+            inputArea.modelToView2D(caretPos)?.bounds ?: inputArea.modelToView(caretPos)
+        } catch (e: Exception) {
+            log.warn("CommandCompletionHandler: modelToView failed for position $caretPos: ${e.message}")
+            null
+        }
+
+        if (rect != null) {
+            val point = Point(rect.x, rect.y + rect.height)
+            SwingUtilities.convertPointToScreen(point, inputArea)
+            log.info("CommandCompletionHandler: Showing popup at screen coordinates (${point.x}, ${point.y})")
+            popup.show(inputArea, point.x, point.y)
         } else {
+            log.warn("CommandCompletionHandler: Could not calculate popup position, using fallback")
             popup.show(inputArea, 0, inputArea.height)
         }
 
@@ -117,15 +130,17 @@ class CommandCompletionHandler(
 
         try {
             val caretPos = inputArea.caretPosition
-            val caretCoords = inputArea.modelToView(caretPos)
-            if (caretCoords != null) {
-                val popupLocation = SwingUtilities.convertPoint(
-                    inputArea,
-                    caretCoords.x,
-                    caretCoords.y + caretCoords.height,
-                    inputArea.parent
-                )
-                currentPopup?.showParameterHints(command, popupLocation.x, popupLocation.y)
+            val rect = try {
+                inputArea.modelToView2D(caretPos)?.bounds ?: inputArea.modelToView(caretPos)
+            } catch (e: Exception) {
+                log.warn("CommandCompletionHandler: modelToView failed for parameter hints: ${e.message}")
+                null
+            }
+
+            if (rect != null) {
+                val point = Point(rect.x, rect.y + rect.height)
+                SwingUtilities.convertPointToScreen(point, inputArea)
+                currentPopup?.showParameterHints(command, point.x, point.y)
             }
         } catch (e: Exception) {
             log.debug("Failed to show parameter hints: ${e.message}")

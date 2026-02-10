@@ -29,6 +29,7 @@ class MentionCompletionPopup(
      * Show the popup at the given component location.
      */
     fun show(component: Component, x: Int, y: Int) {
+        log.info("MentionCompletionPopup: Showing popup with ${items.size} items at ($x, $y)")
         val step = object : BaseListPopupStep<MentionItem>("", items) {
             override fun getTextFor(value: MentionItem): String = value.displayText
 
@@ -40,13 +41,18 @@ class MentionCompletionPopup(
             }
         }
 
-        popup = JBPopupFactory.getInstance()
-            .createListPopup(step)
-            .apply {
-                // Don't steal focus from input area to allow continued typing
-                setRequestFocus(false)
-                showInScreenCoordinates(component, java.awt.Point(x, y))
-            }
+        try {
+            popup = JBPopupFactory.getInstance()
+                .createListPopup(step)
+                .apply {
+                    // Don't steal focus from input area to allow continued typing
+                    setRequestFocus(false)
+                    showInScreenCoordinates(component, java.awt.Point(x, y))
+                }
+            log.info("MentionCompletionPopup: Popup shown successfully")
+        } catch (e: Exception) {
+            log.warn("MentionCompletionPopup: Failed to show popup: ${e.message}", e)
+        }
     }
 
     /**

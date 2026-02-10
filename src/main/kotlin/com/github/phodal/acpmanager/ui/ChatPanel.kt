@@ -114,7 +114,21 @@ class ChatPanel(
             project = project,
             onSendClick = { sendMessage() },
             onStopClick = { cancelMessage() }
-        )
+        ).apply {
+            // Connect completion trigger buttons
+            onMentionClick = {
+                println("ChatPanel: onMentionClick triggered")
+                log.info("ChatPanel: onMentionClick triggered")
+                inputArea.requestFocusInWindow()
+                completionManager.triggerMentionCompletion()
+            }
+            onCommandClick = {
+                println("ChatPanel: onCommandClick triggered")
+                log.info("ChatPanel: onCommandClick triggered")
+                inputArea.requestFocusInWindow()
+                completionManager.triggerCommandCompletion()
+            }
+        }
 
         // Task status panel (above input area)
         taskStatusPanel = TaskStatusPanel()

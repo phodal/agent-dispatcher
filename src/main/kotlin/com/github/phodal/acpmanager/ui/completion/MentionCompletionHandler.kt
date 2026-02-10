@@ -33,11 +33,14 @@ class MentionCompletionHandler(
         if (mentionContext != null) {
             // We're in a mention context, show/update popup
             val query = mentionContext.query
+            log.info("MentionCompletionHandler: Found mention context, query='$query'")
             val items = getMentionItems(query)
+            log.info("MentionCompletionHandler: Got ${items.size} mention items")
 
             if (items.isNotEmpty()) {
                 showPopup(items, mentionContext.startPos)
             } else {
+                log.info("MentionCompletionHandler: No items, closing popup")
                 closePopup()
             }
         } else {
@@ -70,22 +73,22 @@ class MentionCompletionHandler(
      * Returns null if not in a mention context.
      */
     private fun findMentionContext(text: String, caretPos: Int): MentionContext? {
-        if (caretPos <= 0) return null
+        if (text.isEmpty() || caretPos <= 0 || caretPos > text.length) return null
 
         // Look backwards from caret to find @ symbol
         var pos = caretPos - 1
-        while (pos >= 0 && text[pos] != '@' && text[pos] != ' ' && text[pos] != '\n') {
+        while (pos >= 0 && pos < text.length && text[pos] != '@' && text[pos] != ' ' && text[pos] != '\n') {
             pos--
         }
 
-        if (pos < 0 || text[pos] != '@') return null
+        if (pos < 0 || pos >= text.length || text[pos] != '@') return null
 
         // Found @, extract query from @ to caret
         val atPos = pos
         val query = text.substring(atPos + 1, caretPos).trim()
 
         // Check if there's a space or newline between @ and query start
-        if (atPos + 1 < caretPos && text[atPos + 1] == ' ') {
+        if (atPos + 1 < caretPos && atPos + 1 < text.length && text[atPos + 1] == ' ') {
             return null // @ followed by space, not a mention
         }
 
@@ -107,6 +110,7 @@ class MentionCompletionHandler(
      * Show the mention popup.
      */
     private fun showPopup(items: List<MentionItem>, mentionStartPos: Int) {
+        log.info("MentionCompletionHandler: showPopup called with ${items.size} items, mentionStartPos=$mentionStartPos")
         // Close existing popup
         closePopup()
 
@@ -120,11 +124,24 @@ class MentionCompletionHandler(
             onClose = { currentPopup = null }
         )
 
-        // Calculate popup position (below the @ symbol)
-        val caretPos = inputArea.caretPosition
-        val rect = inputArea.modelToView(caretPos) ?: return
+        // Calculate popup position (below the @ symbol, not the caret)
+        // Use mentionStartPos + 1 to position popup right after the @ symbol
+        val popupPos = mentionStartPos + 1
+        val rect = try {
+            inputArea.modelToView2D(popupPos)?.bounds ?: inputArea.modelToView(popupPos)
+        } catch (e: Exception) {
+            log.warn("MentionCompletionHandler: modelToView failed for position $popupPos: ${e.message}")
+            null
+        }
+
+        if (rect == null) {
+            log.warn("MentionCompletionHandler: modelToView returned null for position $popupPos")
+            return
+        }
+
         val point = Point(rect.x, rect.y + rect.height)
         SwingUtilities.convertPointToScreen(point, inputArea)
+        log.info("MentionCompletionHandler: Showing popup at screen coordinates (${point.x}, ${point.y})")
 
         popup.show(inputArea, point.x, point.y)
         currentPopup = popup
