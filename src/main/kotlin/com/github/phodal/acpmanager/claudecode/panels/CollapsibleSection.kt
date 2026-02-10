@@ -10,8 +10,12 @@ import java.awt.event.MouseEvent
 import javax.swing.*
 
 /**
- * A collapsible section within a panel.
- * Used for showing input/output sections that can be expanded.
+ * Modern collapsible section for nested content.
+ *
+ * Design principles:
+ * - Minimal header with subtle expand indicator
+ * - Clean content display
+ * - Compact sizing
  */
 class CollapsibleSection(
     private val sectionTitle: String,
@@ -27,19 +31,19 @@ class CollapsibleSection(
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = false
-        border = JBUI.Borders.empty(1, 0) // Reduced padding
+        border = JBUI.Borders.empty(2, 0)
         alignmentX = Component.LEFT_ALIGNMENT
 
-        // Header
+        // Header - simple and clean
         headerLabel = JBLabel(getHeaderText()).apply {
-            foreground = titleColor
+            foreground = UIUtil.getLabelDisabledForeground()
             font = font.deriveFont(font.size2D - 1)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             alignmentX = Component.LEFT_ALIGNMENT
         }
         add(headerLabel)
 
-        // Content area with scroll
+        // Content area
         contentArea = JTextArea().apply {
             isEditable = false
             isOpaque = false
@@ -47,15 +51,15 @@ class CollapsibleSection(
             wrapStyleWord = true
             font = UIUtil.getLabelFont().deriveFont(font.size2D - 1)
             foreground = UIUtil.getLabelForeground()
-            border = JBUI.Borders.empty(2) // Reduced padding
+            border = JBUI.Borders.empty(4, 0)
         }
 
         scrollPane = JBScrollPane(contentArea).apply {
             isOpaque = false
             viewport.isOpaque = false
             border = JBUI.Borders.empty()
-            preferredSize = Dimension(0, JBUI.scale(80)) // Reduced height
-            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(120)) // Reduced max height
+            preferredSize = Dimension(0, JBUI.scale(60))
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(100))
             alignmentX = Component.LEFT_ALIGNMENT
             isVisible = false
         }
@@ -71,10 +75,7 @@ class CollapsibleSection(
 
     private fun getHeaderText(): String {
         val icon = if (expanded) "▼" else "▶"
-        val preview = if (!expanded && currentContent.isNotEmpty()) {
-            " - ${currentContent.take(50)}${if (currentContent.length > 50) "..." else ""}"
-        } else ""
-        return "$icon $sectionTitle$preview"
+        return "$icon $sectionTitle"
     }
 
     private fun toggle() {
@@ -82,12 +83,10 @@ class CollapsibleSection(
         headerLabel.text = getHeaderText()
         scrollPane.isVisible = expanded
 
-        // Force recalculation of sizes - critical for proper collapse behavior
         invalidate()
         revalidate()
         repaint()
 
-        // Propagate layout changes up the hierarchy
         var p = parent
         while (p != null) {
             p.invalidate()
@@ -103,7 +102,6 @@ class CollapsibleSection(
     fun setContent(content: String) {
         currentContent = content
         contentArea.text = content
-        headerLabel.text = getHeaderText()
         revalidate()
         repaint()
     }

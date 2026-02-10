@@ -4,12 +4,12 @@ import com.agentclientprotocol.model.ToolCallStatus
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import java.awt.Color
 import java.awt.Component
-import java.awt.Cursor
 import java.awt.Dimension
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
+import java.awt.FlowLayout
+import java.awt.Font
 import javax.swing.BoxLayout
 import javax.swing.JPanel
 
@@ -25,9 +25,12 @@ data class TaskInfo(
 )
 
 /**
- * Collapsible panel showing a summary of all tasks.
- * When collapsed, shows task count. When expanded, shows all tasks with their status.
- * Each task can be further expanded to show input/output.
+ * Modern, minimal task summary panel.
+ *
+ * Design principles:
+ * - Compact single-line display when collapsed
+ * - Simple task list when expanded
+ * - Status shown via icons only, not colors
  */
 class TaskSummaryPanel(
     initialTasks: List<TaskInfo>,
@@ -38,6 +41,9 @@ class TaskSummaryPanel(
     private val taskPanels = mutableMapOf<String, TaskItemPanel>()
 
     init {
+        border = JBUI.Borders.empty(4, 8)
+        headerTitle.foreground = UIUtil.getLabelForeground()
+        headerTitle.font = headerTitle.font.deriveFont(Font.PLAIN)
         updateHeaderText()
     }
 
@@ -71,7 +77,7 @@ class TaskSummaryPanel(
     private fun updateHeaderText() {
         val completed = currentTasks.count { it.status == ToolCallStatus.COMPLETED }
         val total = currentTasks.size
-        setTitle("📋 Tasks ($completed/$total completed)")
+        setTitle("Tasks ($completed/$total completed)")
     }
 
     private fun updateTaskList() {
@@ -80,7 +86,7 @@ class TaskSummaryPanel(
             taskPanels.clear()
 
             for (task in currentTasks) {
-                val taskPanel = TaskItemPanel(task, headerColor)
+                val taskPanel = TaskItemPanel(task)
                 taskPanels[task.id] = taskPanel
                 contentPanel.add(taskPanel)
             }
@@ -104,44 +110,34 @@ class TaskSummaryPanel(
 }
 
 /**
- * Individual task item panel with collapsible input/output.
+ * Modern, minimal task item display.
+ * Shows status icon and title only - no nested sections.
  */
 class TaskItemPanel(
-    private var task: TaskInfo,
-    private val accentColor: Color
+    private var task: TaskInfo
 ) : JPanel() {
 
-    private val statusLabel: JBLabel
-    private val inputSection: CollapsibleSection
-    private val outputSection: CollapsibleSection
+    private val statusIcon: JBLabel
+    private val titleLabel: JBLabel
 
     init {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        layout = FlowLayout(FlowLayout.LEFT, 4, 2)
         isOpaque = false
-        border = JBUI.Borders.empty(2, 0)
         alignmentX = Component.LEFT_ALIGNMENT
 
-        // Status line
-        statusLabel = JBLabel(getStatusText()).apply {
-            foreground = getStatusColor()
+        // Status icon
+        statusIcon = JBLabel(getStatusIcon()).apply {
+            foreground = getStatusIconColor()
+            font = font.deriveFont(12f)
+        }
+        add(statusIcon)
+
+        // Title
+        titleLabel = JBLabel(task.title).apply {
+            foreground = UIUtil.getLabelForeground()
             font = font.deriveFont(font.size2D - 1)
-            alignmentX = Component.LEFT_ALIGNMENT
         }
-        add(statusLabel)
-
-        // Input section
-        inputSection = CollapsibleSection("📥 Input", accentColor).apply {
-            isVisible = task.input?.isNotEmpty() == true
-        }
-        task.input?.let { inputSection.setContent(it) }
-        add(inputSection)
-
-        // Output section
-        outputSection = CollapsibleSection("📤 Output", accentColor).apply {
-            isVisible = task.output?.isNotEmpty() == true
-        }
-        task.output?.let { outputSection.setContent(it) }
-        add(outputSection)
+        add(titleLabel)
     }
 
     private fun getStatusIcon(): String = when (task.status) {
@@ -151,29 +147,18 @@ class TaskItemPanel(
         else -> "○"
     }
 
-    private fun getStatusColor(): Color = when (task.status) {
-        ToolCallStatus.COMPLETED -> JBColor(Color(0x2E7D32), Color(0x81C784))
-        ToolCallStatus.FAILED -> JBColor.RED
-        else -> accentColor
+    private fun getStatusIconColor(): Color = when (task.status) {
+        ToolCallStatus.COMPLETED -> JBColor(Color(0x4CAF50), Color(0x81C784))
+        ToolCallStatus.FAILED -> JBColor(Color(0xE57373), Color(0xEF5350))
+        ToolCallStatus.IN_PROGRESS -> JBColor(Color(0x64B5F6), Color(0x90CAF9))
+        else -> UIUtil.getLabelDisabledForeground()
     }
-
-    private fun getStatusText(): String = "${getStatusIcon()} ${task.title}"
 
     fun updateTask(newTask: TaskInfo) {
         task = newTask
-        statusLabel.text = getStatusText()
-        statusLabel.foreground = getStatusColor()
-
-        task.input?.let {
-            inputSection.setContent(it)
-            inputSection.isVisible = it.isNotEmpty()
-        }
-
-        task.output?.let {
-            outputSection.setContent(it)
-            outputSection.isVisible = it.isNotEmpty()
-        }
-
+        statusIcon.text = getStatusIcon()
+        statusIcon.foreground = getStatusIconColor()
+        titleLabel.text = task.title
         revalidate()
         repaint()
     }

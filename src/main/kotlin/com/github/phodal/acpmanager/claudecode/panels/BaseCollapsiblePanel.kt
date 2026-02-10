@@ -9,7 +9,12 @@ import java.awt.event.MouseEvent
 import javax.swing.*
 
 /**
- * Base class for collapsible panels with a header and expandable content.
+ * Modern base class for collapsible panels.
+ *
+ * Design principles:
+ * - Clean, minimal header with subtle expand indicator
+ * - Smooth visual hierarchy
+ * - Compact but readable
  */
 abstract class BaseCollapsiblePanel(
     protected val headerColor: Color,
@@ -31,24 +36,26 @@ abstract class BaseCollapsiblePanel(
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = false
-        border = JBUI.Borders.empty(1, 8) // Reduced vertical padding for compact layout
+        border = JBUI.Borders.empty(2, 8)
 
-        // Header panel
-        headerPanel = JPanel(BorderLayout(2, 0)).apply { // Reduced gap
+        // Header panel - clean layout
+        headerPanel = JPanel(BorderLayout(4, 0)).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         }
 
+        // Expand icon - subtle
         headerIcon = JBLabel(getExpandIcon()).apply {
-            foreground = headerColor
-            font = font.deriveFont(Font.BOLD)
+            foreground = UIUtil.getLabelDisabledForeground()
+            font = font.deriveFont(10f)
         }
         headerPanel.add(headerIcon, BorderLayout.WEST)
 
+        // Title - normal weight
         headerTitle = JBLabel().apply {
             foreground = headerColor
-            font = font.deriveFont(Font.BOLD, font.size2D - 1)
+            font = font.deriveFont(Font.PLAIN, font.size2D)
         }
         headerPanel.add(headerTitle, BorderLayout.CENTER)
 
@@ -58,7 +65,7 @@ abstract class BaseCollapsiblePanel(
         contentPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
-            border = JBUI.Borders.emptyLeft(20)
+            border = JBUI.Borders.emptyLeft(16)
             alignmentX = Component.LEFT_ALIGNMENT
             isVisible = initiallyExpanded
         }
@@ -78,7 +85,7 @@ abstract class BaseCollapsiblePanel(
         headerIcon.text = getExpandIcon()
         contentPanel.isVisible = isExpanded
 
-        // Force recalculation of sizes - this is critical for proper collapse behavior
+        // Force recalculation of sizes
         invalidate()
         revalidate()
         repaint()
@@ -94,13 +101,11 @@ abstract class BaseCollapsiblePanel(
     }
 
     override fun getMaximumSize(): Dimension {
-        // Always return dynamic height based on current preferred size
         val pref = preferredSize
         return Dimension(Int.MAX_VALUE, pref.height)
     }
 
     override fun getMinimumSize(): Dimension {
-        // Minimum size should also be dynamic
         val pref = preferredSize
         return Dimension(0, pref.height)
     }

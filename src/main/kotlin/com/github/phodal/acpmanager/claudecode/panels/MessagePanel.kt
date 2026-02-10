@@ -15,10 +15,15 @@ import javax.swing.JPanel
 import javax.swing.JTextArea
 
 /**
- * Panel for displaying user or assistant messages.
+ * Modern, clean panel for displaying user or assistant messages.
+ *
+ * Design principles:
+ * - Clear sender identification
+ * - Subtle timestamp
+ * - Clean content display
  */
 class MessagePanel(
-    private val name: String,
+    private val name: String?,
     private val content: String,
     private val timestamp: Long,
     private val headerColor: Color
@@ -26,26 +31,42 @@ class MessagePanel(
 
     override val component: JPanel get() = this
 
+    companion object {
+        private val dateFormat = SimpleDateFormat("HH:mm")
+    }
+
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = false
-        border = JBUI.Borders.empty(4, 8)
+        border = JBUI.Borders.empty(6, 8, 4, 8)
+
+        // Determine display name - never show "Unknown"
+        val displayName = when {
+            !name.isNullOrBlank() -> name
+            else -> "User" // Default fallback
+        }
 
         val header = JPanel(BorderLayout()).apply {
             isOpaque = false
-            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(20))
-            add(JBLabel(name ?: "Unknown").apply {
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(18))
+
+            // Sender name with subtle styling
+            add(JBLabel(displayName).apply {
                 foreground = headerColor
-                font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
+                font = UIUtil.getLabelFont().deriveFont(Font.BOLD, UIUtil.getLabelFont().size2D - 1)
             }, BorderLayout.WEST)
-            add(JBLabel(SimpleDateFormat("HH:mm:ss").format(Date(timestamp))).apply {
+
+            // Timestamp - very subtle
+            add(JBLabel(dateFormat.format(Date(timestamp))).apply {
                 foreground = UIUtil.getLabelDisabledForeground()
                 font = UIUtil.getLabelFont().deriveFont(UIUtil.getLabelFont().size2D - 2)
             }, BorderLayout.EAST)
+
             alignmentX = Component.LEFT_ALIGNMENT
         }
         add(header)
 
+        // Content area
         val textArea = JTextArea(content).apply {
             isEditable = false
             isOpaque = false
@@ -53,7 +74,7 @@ class MessagePanel(
             wrapStyleWord = true
             font = UIUtil.getLabelFont()
             foreground = UIUtil.getLabelForeground()
-            border = JBUI.Borders.emptyTop(2)
+            border = JBUI.Borders.emptyTop(4)
             alignmentX = Component.LEFT_ALIGNMENT
         }
         add(textArea)

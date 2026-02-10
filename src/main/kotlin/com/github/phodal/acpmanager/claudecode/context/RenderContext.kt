@@ -79,15 +79,39 @@ class RenderContext(
 
 /**
  * Color scheme for rendering.
+ * Uses subtle, modern colors that don't distract from content.
  */
 class RenderColors {
     val panelBg: Color = UIUtil.getPanelBackground()
+
+    // Subtle gray for thinking - blends with background
     val thinkingFg: Color = UIUtil.getLabelDisabledForeground()
-    val messageFg: Color = JBColor(Color(0x2E7D32), Color(0x81C784)) // Green for assistant
-    val userFg: Color = JBColor(Color(0x1565C0), Color(0x64B5F6)) // Blue for user
-    val toolFg: Color = JBColor(Color(0xE65100), Color(0xFFB74D)) // Orange for tools
-    val taskFg: Color = JBColor(Color(0x00695C), Color(0x4DB6AC)) // Teal for tasks
-    val successFg: Color = JBColor(Color(0x2E7D32), Color(0x81C784)) // Green for success
-    val errorFg: Color = JBColor.RED
+
+    // Normal text color for assistant messages - no special color
+    val messageFg: Color = UIUtil.getLabelForeground()
+
+    // Slightly muted blue for user messages - subtle distinction
+    val userFg: Color = JBColor(Color(0x5C6BC0), Color(0x7986CB))
+
+    // Normal text color for tools - status shown via icons only
+    val toolFg: Color = UIUtil.getLabelForeground()
+
+    // Normal text color for tasks - status shown via icons only
+    val taskFg: Color = UIUtil.getLabelForeground()
+
+    // Status colors - only used for icons, not text
+    val successIcon: Color = JBColor(Color(0x4CAF50), Color(0x81C784))
+    val errorIcon: Color = JBColor(Color(0xE57373), Color(0xEF5350))
+    val pendingIcon: Color = UIUtil.getLabelDisabledForeground()
+    val inProgressIcon: Color = JBColor(Color(0x64B5F6), Color(0x90CAF9))
+
+    // Secondary text color for timestamps, metadata
+    val secondaryFg: Color = UIUtil.getLabelDisabledForeground()
+
+    // Deprecated - kept for compatibility
+    @Deprecated("Use successIcon instead", ReplaceWith("successIcon"))
+    val successFg: Color = successIcon
+    @Deprecated("Use errorIcon instead", ReplaceWith("errorIcon"))
+    val errorFg: Color = errorIcon
 }
 

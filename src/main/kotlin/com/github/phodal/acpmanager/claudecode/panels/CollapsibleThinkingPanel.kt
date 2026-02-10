@@ -7,13 +7,15 @@ import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
-import javax.swing.JPanel
 import javax.swing.JTextArea
 
 /**
- * Collapsible panel for displaying thinking/reasoning content.
- * Defaults to collapsed state with a subtle appearance.
- * Shows a brief preview when collapsed.
+ * Modern, minimal panel for displaying thinking/reasoning content.
+ *
+ * Design principles:
+ * - Collapsed by default with subtle appearance
+ * - No duplicate text - preview only shown when collapsed
+ * - Clean, non-distracting gray styling
  */
 class CollapsibleThinkingPanel(
     accentColor: Color
@@ -21,25 +23,19 @@ class CollapsibleThinkingPanel(
 
     private val contentArea: JTextArea
     private val signatureLabel: JBLabel
-    private val previewLabel: JBLabel
     private var fullContent: String = ""
 
     init {
-        // Use subtle border
+        // Subtle border
         border = JBUI.Borders.empty(2, 8)
 
-        // Set header with thinking icon - more subtle
-        headerTitle.text = "💡 Thinking"
-        headerTitle.font = headerTitle.font.deriveFont(Font.PLAIN, headerTitle.font.size2D - 1)
+        // Simple header - just "Thinking" with subtle styling
+        headerTitle.text = "Thinking..."
+        headerTitle.font = headerTitle.font.deriveFont(Font.ITALIC, headerTitle.font.size2D - 1)
         headerTitle.foreground = UIUtil.getLabelDisabledForeground()
 
-        // Preview label for collapsed state
-        previewLabel = JBLabel().apply {
-            foreground = UIUtil.getLabelDisabledForeground()
-            font = font.deriveFont(Font.ITALIC, font.size2D - 2)
-            border = JBUI.Borders.emptyLeft(8)
-        }
-        headerPanel.add(previewLabel, java.awt.BorderLayout.EAST)
+        // Make header icon subtle
+        headerIcon.foreground = UIUtil.getLabelDisabledForeground()
 
         // Content area for full thinking text
         contentArea = JTextArea().apply {
@@ -54,7 +50,7 @@ class CollapsibleThinkingPanel(
         }
         contentPanel.add(contentArea)
 
-        // Signature label
+        // Signature label (hidden by default)
         signatureLabel = JBLabel().apply {
             foreground = UIUtil.getLabelDisabledForeground()
             font = font.deriveFont(font.size2D - 2)
@@ -63,15 +59,12 @@ class CollapsibleThinkingPanel(
             isVisible = false
         }
         contentPanel.add(signatureLabel)
-
-        // Make header icon more subtle
-        headerIcon.foreground = UIUtil.getLabelDisabledForeground()
     }
 
     override fun updateContent(content: String) {
         fullContent = content
         contentArea.text = content
-        updatePreview()
+        updateHeaderText()
         revalidate()
         repaint()
         parent?.revalidate()
@@ -80,32 +73,37 @@ class CollapsibleThinkingPanel(
     override fun finalize(content: String, signature: String?) {
         fullContent = content
         contentArea.text = content
-        headerTitle.text = "💡 Thinking"
+
+        // Update header to show it's complete
+        headerTitle.text = "Thinking"
+        headerTitle.font = headerTitle.font.deriveFont(Font.PLAIN)
 
         signature?.let {
-            signatureLabel.text = "✓ Verified (${it.take(8)}...)"
+            signatureLabel.text = "✓ ${it.take(8)}..."
             signatureLabel.isVisible = true
         }
 
-        updatePreview()
         revalidate()
         repaint()
         parent?.revalidate()
     }
 
-    private fun updatePreview() {
-        if (fullContent.isNotEmpty()) {
-            val preview = fullContent.take(50).replace("\n", " ").trim()
-            previewLabel.text = if (fullContent.length > 50) "$preview..." else preview
-            previewLabel.isVisible = !isExpanded
+    private fun updateHeaderText() {
+        // Show brief preview in header only when collapsed and has content
+        if (!isExpanded && fullContent.isNotEmpty()) {
+            val preview = fullContent.take(40).replace("\n", " ").trim()
+            val suffix = if (fullContent.length > 40) "..." else ""
+            headerTitle.text = "Thinking: $preview$suffix"
+        } else if (isExpanded) {
+            headerTitle.text = "Thinking"
         } else {
-            previewLabel.isVisible = false
+            headerTitle.text = "Thinking..."
         }
     }
 
     override fun updateExpandedState() {
         super.updateExpandedState()
-        previewLabel.isVisible = !isExpanded && fullContent.isNotEmpty()
+        updateHeaderText()
     }
 
     override fun getMaximumSize(): Dimension {
