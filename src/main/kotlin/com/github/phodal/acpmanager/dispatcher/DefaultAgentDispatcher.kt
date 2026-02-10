@@ -114,6 +114,9 @@ class DefaultAgentDispatcher(
                     updateStatus(DispatcherStatus.FAILED)
                     emitLog(LogLevel.ERR, "Master", message = "Some tasks failed.")
                 } else {
+                    // Aggregate final output from the last task(s) in the chain
+                    val finalOutput = buildFinalOutput(effectivePlan)
+                    _state.update { it.copy(finalOutput = finalOutput) }
                     updateStatus(DispatcherStatus.COMPLETED)
                     emitLog(LogLevel.INF, "Master", message = "All tasks completed successfully.")
                 }
@@ -230,8 +233,15 @@ class DefaultAgentDispatcher(
             logFlow.collect { logEntry ->
                 _logStream.emit(logEntry)
                 _state.update { it.copy(logs = it.logs + logEntry) }
-                // Collect task output for context passing
-                if (logEntry.level == LogLevel.INF && logEntry.taskId == task.id) {
+                // Collect actual agent content output for context passing.
+                // Use isContent flag if set (from IdeaAgentExecutor), otherwise
+                // fall back to INF-level messages for TerminalAgentExecutor compatibility.
+                if (logEntry.taskId == task.id && (logEntry.isContent ||
+                        (logEntry.level == LogLevel.INF && !logEntry.message.startsWith("Starting") &&
+                         !logEntry.message.startsWith("Connecting") &&
+                         !logEntry.message.startsWith("Execution completed") &&
+                         !logEntry.message.startsWith("Prompt complete") &&
+                         !logEntry.message.startsWith("Tool:")))) {
                     resultBuilder.appendLine(logEntry.message)
                 }
             }
@@ -290,6 +300,31 @@ class DefaultAgentDispatcher(
 
     // --- Helpers ---
 
+    /**
+     * Build the final output from completed tasks.
+     * Uses the last task's result (the terminal task in the dependency chain),
+     * or aggregates all task results if there are multiple terminal tasks.
+     */
+    private fun buildFinalOutput(plan: DispatchPlan): String? {
+        // Find tasks that no other task depends on (terminal tasks)
+        val allDeps = plan.tasks.flatMap { it.dependencies }.toSet()
+        val terminalTasks = plan.tasks.filter { it.id !in allDeps }
+
+        // If we have exactly one terminal task, use its result
+        if (terminalTasks.size == 1) {
+            return taskResults[terminalTasks[0].id]
+        }
+
+        // Multiple terminal tasks: aggregate their results
+        val parts = terminalTasks.mapNotNull { task ->
+            taskResults[task.id]?.let { result ->
+                "### ${task.title}\n$result"
+            }
+        }
+
+        return if (parts.isNotEmpty()) parts.joinToString("\n\n") else null
+    }
+
     private fun updateStatus(status: DispatcherStatus) {
         _state.update { it.copy(status = status) }
     }
@@ -309,7 +344,7 @@ class DefaultAgentDispatcher(
         _state.update { current ->
             val updatedPlan = current.plan?.let { plan ->
                 plan.copy(tasks = plan.tasks.map { task ->
-                    if (task.id == taskId) task.copy(result = result.take(2000)) else task
+                    if (task.id == taskId) task.copy(result = result.take(8000)) else task
                 })
             }
             current.copy(plan = updatedPlan)

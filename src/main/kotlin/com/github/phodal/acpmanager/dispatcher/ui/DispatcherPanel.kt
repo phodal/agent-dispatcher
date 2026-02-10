@@ -260,6 +260,9 @@ class DispatcherPanel(
     private fun updateUI(state: DispatcherState) {
         masterAgentPanel.updateStatus(state.status)
 
+        // Show final output when available
+        masterAgentPanel.updateFinalOutput(state.finalOutput)
+
         state.plan?.let { plan ->
             masterAgentPanel.updateThinking(plan.thinking)
             masterAgentPanel.updatePlanItems(

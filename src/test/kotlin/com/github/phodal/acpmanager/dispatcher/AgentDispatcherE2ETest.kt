@@ -492,4 +492,39 @@ class AgentDispatcherE2ETest {
         val task3Prompt = executor.receivedPrompts["task-3"]!!
         assertTrue("task-3 should reference task-2 output", task3Prompt.contains("Implemented using pattern X"))
     }
+
+    @Test
+    fun `test final output is aggregated from terminal tasks`() = runTest {
+        // task-1 -> task-2: final output should be task-2's result (the terminal task)
+        planGenerator.setFixedPlan(
+            DispatchPlan(
+                tasks = listOf(
+                    AgentTask(
+                        id = "task-1", title = "Analyze",
+                        description = "Analyze the project",
+                        assignedAgent = "researcher",
+                    ),
+                    AgentTask(
+                        id = "task-2", title = "Create diagram",
+                        description = "Create Mermaid diagram",
+                        assignedAgent = "coder",
+                        dependencies = listOf("task-1"),
+                    ),
+                ),
+                maxParallelism = 1,
+            )
+        )
+
+        executor.setSimulatedResult("task-1", listOf("Found 3 modules: A, B, C"), delayMs = 5)
+        executor.setSimulatedResult("task-2", listOf("```mermaid", "graph TB", "  A --> B", "  B --> C", "```"), delayMs = 5)
+
+        dispatcher.startPlanning("Generate architecture diagram")
+        dispatcher.executePlan()
+
+        val finalState = dispatcher.state.value
+        assertEquals(DispatcherStatus.COMPLETED, finalState.status)
+        assertNotNull("Final output should be set", finalState.finalOutput)
+        assertTrue("Final output should contain mermaid diagram", finalState.finalOutput!!.contains("graph TB"))
+        assertTrue("Final output should contain the diagram content", finalState.finalOutput!!.contains("A --> B"))
+    }
 }

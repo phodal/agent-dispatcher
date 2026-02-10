@@ -83,12 +83,14 @@ class IdeaAgentExecutor(
 
                     val logMsg = renderEventToLogMessage(event)
                     if (logMsg != null) {
+                        val isContent = event is RenderEvent.MessageEnd
                         logChannel.send(
                             AgentLogEntry(
                                 level = if (event is RenderEvent.Error) LogLevel.ERR else LogLevel.INF,
                                 source = agentKey,
                                 taskId = taskId,
                                 message = logMsg,
+                                isContent = isContent,
                             )
                         )
                     }
@@ -169,7 +171,7 @@ class IdeaAgentExecutor(
      */
     private fun renderEventToLogMessage(event: RenderEvent): String? {
         return when (event) {
-            is RenderEvent.MessageEnd -> event.fullContent.take(200)
+            is RenderEvent.MessageEnd -> event.fullContent
             is RenderEvent.ToolCallStart -> "Tool: ${event.toolName} — ${event.title ?: ""}"
             is RenderEvent.ToolCallEnd -> "Tool completed: ${event.title ?: event.toolCallId}"
             is RenderEvent.Error -> "Error: ${event.message}"

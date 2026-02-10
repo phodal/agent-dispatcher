@@ -47,6 +47,34 @@ class MasterAgentPanel : JPanel(BorderLayout()) {
         isOpaque = false
     }
 
+    private val resultArea = JTextArea(6, 40).apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        background = JBColor(0x0D2818, 0x0D2818)
+        foreground = JBColor(0xA7F3D0, 0xA7F3D0)
+        font = Font("Monospaced", Font.PLAIN, 12)
+        border = JBUI.Borders.empty(8)
+    }
+
+    private val resultPanel = JPanel(BorderLayout(0, 4)).apply {
+        isOpaque = false
+        border = JBUI.Borders.emptyTop(8)
+        isVisible = false
+
+        val resultLabel = JBLabel("OUTPUT").apply {
+            foreground = JBColor(0x10B981, 0x10B981)
+            font = font.deriveFont(Font.BOLD, 10f)
+        }
+        add(resultLabel, BorderLayout.NORTH)
+
+        val resultScroll = JScrollPane(resultArea).apply {
+            border = BorderFactory.createLineBorder(JBColor(0x10B981, 0x21262D))
+            preferredSize = Dimension(0, 120)
+        }
+        add(resultScroll, BorderLayout.CENTER)
+    }
+
     var onMasterAgentChanged: (String) -> Unit = {}
 
     init {
@@ -101,12 +129,17 @@ class MasterAgentPanel : JPanel(BorderLayout()) {
             }
             add(thinkingScroll, BorderLayout.CENTER)
 
-            // Plan items
-            val planScroll = JScrollPane(planItemsPanel).apply {
-                border = JBUI.Borders.emptyTop(4)
-                preferredSize = Dimension(0, 80)
+            // Plan items + result area
+            val bottomPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(JScrollPane(planItemsPanel).apply {
+                    border = JBUI.Borders.emptyTop(4)
+                    preferredSize = Dimension(0, 80)
+                })
+                add(resultPanel)
             }
-            add(planScroll, BorderLayout.SOUTH)
+            add(bottomPanel, BorderLayout.SOUTH)
         }
         add(centerPanel, BorderLayout.CENTER)
 
@@ -164,6 +197,19 @@ class MasterAgentPanel : JPanel(BorderLayout()) {
         }
         planItemsPanel.revalidate()
         planItemsPanel.repaint()
+    }
+
+    fun updateFinalOutput(output: String?) {
+        if (output.isNullOrBlank()) {
+            resultPanel.isVisible = false
+            resultArea.text = ""
+        } else {
+            resultArea.text = output
+            resultArea.caretPosition = 0
+            resultPanel.isVisible = true
+        }
+        revalidate()
+        repaint()
     }
 
     private fun createPlanItemRow(item: PlanItemDisplay): JPanel {

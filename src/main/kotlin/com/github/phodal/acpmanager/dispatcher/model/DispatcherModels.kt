@@ -78,6 +78,10 @@ data class AgentRole(
 
 /**
  * A log entry from an agent execution.
+ *
+ * @param isContent When true, this log entry represents actual agent content output
+ *   (e.g., MessageEnd) rather than operational messages (e.g., "Tool: READ", "Connecting...").
+ *   Used by the dispatcher to extract task results for context passing to dependent tasks.
  */
 data class AgentLogEntry(
     val timestamp: Long = System.currentTimeMillis(),
@@ -85,6 +89,7 @@ data class AgentLogEntry(
     val source: String,
     val taskId: String? = null,
     val message: String,
+    val isContent: Boolean = false,
 )
 
 enum class LogLevel {
@@ -103,6 +108,8 @@ data class DispatcherState(
     val logs: List<AgentLogEntry> = emptyList(),
     val masterAgentKey: String? = null,
     val error: String? = null,
+    /** Final aggregated output from all completed tasks, displayed to the user. */
+    val finalOutput: String? = null,
 )
 
 enum class DispatcherStatus {

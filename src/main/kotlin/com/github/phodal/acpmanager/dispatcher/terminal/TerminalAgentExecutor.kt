@@ -96,6 +96,7 @@ class TerminalAgentExecutor : AgentExecutor {
                 source = agentKey,
                 taskId = taskId,
                 message = message,
+                isContent = true,
             )
             executionLogs.add(logEntry)
             emit(logEntry)
