@@ -1,5 +1,6 @@
 package com.github.phodal.acpmanager.ui.mention
 
+import com.github.phodal.acpmanager.ui.fuzzy.FuzzyMatcher
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -32,13 +33,20 @@ class SymbolMentionProvider(private val project: Project) : MentionProvider {
         val psiFile = getCurrentPsiFile() ?: return emptyList()
 
         val symbols = extractSymbols(psiFile)
-        return symbols
-            .filter { matchesQuery(it.name, query) }
-            .map { symbol -> createMentionItem(symbol) }
-            .sortedWith(compareBy(
-                { !it.displayText.equals(query, ignoreCase = true) },
-                { it.displayText.length }
-            ))
+        val itemsWithScores = symbols
+            .mapNotNull { symbol ->
+                val matchResult = FuzzyMatcher.match(symbol.name, query)
+                if (matchResult.matched) {
+                    createMentionItem(symbol) to matchResult.score
+                } else {
+                    null
+                }
+            }
+
+        // Sort by score (descending), then by name length
+        return itemsWithScores
+            .sortedWith(compareBy({ -it.second }, { it.first.displayText.length }))
+            .map { it.first }
     }
 
     private fun getCurrentPsiFile(): PsiFile? {
@@ -116,11 +124,6 @@ class SymbolMentionProvider(private val project: Project) : MentionProvider {
             log.debug("Error getting line number: ${e.message}")
             0
         }
-    }
-
-    private fun matchesQuery(symbolName: String, query: String): Boolean {
-        if (query.isEmpty()) return true
-        return symbolName.contains(query, ignoreCase = true)
     }
 
     private data class Symbol(
