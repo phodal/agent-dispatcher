@@ -6,7 +6,12 @@ import com.github.phodal.acpmanager.claudecode.panels.TaskInfo
 import com.github.phodal.acpmanager.claudecode.panels.TaskSummaryPanel
 import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.github.phodal.acpmanager.ui.renderer.TaskItem
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.vfs.VirtualFileManager
 import kotlin.reflect.KClass
+
+private val log = logger<TaskEventHandler>()
 
 /**
  * Handler for Task tool calls.
@@ -89,8 +94,28 @@ class TaskEventHandler : MultiEventHandler() {
             )
             updateTaskSummary(context)
             emitTaskUpdate(context)
+
+            // Refresh file system when task completes
+            if (event.status == ToolCallStatus.COMPLETED || event.status == ToolCallStatus.FAILED) {
+                refreshFileSystem(context)
+            }
         }
         context.scrollToBottom()
+    }
+
+    /**
+     * Refresh the IDE's file system to detect any file changes made by the task.
+     */
+    private fun refreshFileSystem(context: RenderContext) {
+        val project = context.project
+        if (project != null && !project.isDisposed) {
+            ApplicationManager.getApplication().invokeLater {
+                log.info("Refreshing file system after task completion")
+                VirtualFileManager.getInstance().asyncRefresh {
+                    log.info("File system refresh completed")
+                }
+            }
+        }
     }
 
     private fun updateTaskSummary(context: RenderContext) {

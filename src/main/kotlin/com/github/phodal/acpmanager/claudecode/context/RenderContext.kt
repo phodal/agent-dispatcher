@@ -2,6 +2,7 @@ package com.github.phodal.acpmanager.claudecode.context
 
 import com.github.phodal.acpmanager.claudecode.panels.RenderPanel
 import com.github.phodal.acpmanager.ui.renderer.RenderEvent
+import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.UIUtil
 import java.awt.Color
@@ -15,6 +16,7 @@ class RenderContext(
     val contentPanel: JPanel,
     val scrollCallback: () -> Unit,
     val agentKey: String,
+    val project: Project? = null,
     private val eventCallback: ((RenderEvent) -> Unit)? = null
 ) {
     // Panel registry for managing active panels

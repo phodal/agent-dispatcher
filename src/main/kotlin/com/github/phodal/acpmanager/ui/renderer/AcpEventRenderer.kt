@@ -1,5 +1,6 @@
 package com.github.phodal.acpmanager.ui.renderer
 
+import com.intellij.openapi.project.Project
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -65,12 +66,14 @@ interface AcpEventRendererFactory {
      *
      * @param agentKey The agent identifier
      * @param scrollCallback Callback to trigger scroll to bottom
+     * @param project Optional project instance for IDE integration (e.g., file system refresh)
      * @param eventCallback Optional callback for events emitted by the renderer (e.g., TaskUpdate)
      * @return A new renderer instance
      */
     fun createRenderer(
         agentKey: String,
         scrollCallback: () -> Unit,
+        project: Project? = null,
         eventCallback: ((RenderEvent) -> Unit)? = null
     ): AcpEventRenderer
 }
@@ -112,11 +115,12 @@ object AcpEventRendererRegistry {
         agentKey: String,
         agentType: String,
         scrollCallback: () -> Unit,
+        project: Project? = null,
         eventCallback: ((RenderEvent) -> Unit)? = null
     ): AcpEventRenderer {
         val factory = getFactory(agentType)
             ?: throw IllegalStateException("No renderer factory registered for agent type: $agentType")
-        return factory.createRenderer(agentKey, scrollCallback, eventCallback)
+        return factory.createRenderer(agentKey, scrollCallback, project, eventCallback)
     }
 }
 

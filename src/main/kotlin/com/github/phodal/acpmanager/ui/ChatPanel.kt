@@ -64,6 +64,7 @@ class ChatPanel(
             agentKey = session.agentKey,
             agentType = agentType,
             scrollCallback = { scrollToBottom() },
+            project = project,
             eventCallback = { event -> handleRendererEvent(event) }
         )
 

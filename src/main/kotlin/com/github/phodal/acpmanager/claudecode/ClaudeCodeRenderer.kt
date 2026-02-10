@@ -5,6 +5,7 @@ import com.github.phodal.acpmanager.claudecode.handlers.*
 import com.github.phodal.acpmanager.ui.renderer.AcpEventRenderer
 import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.project.Project
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import javax.swing.BoxLayout
@@ -30,6 +31,7 @@ private val log = logger<ClaudeCodeRenderer>()
 class ClaudeCodeRenderer(
     private val agentKey: String,
     private val scrollCallback: () -> Unit,
+    private val project: Project? = null,
     private val eventCallback: ((RenderEvent) -> Unit)? = null,
 ) : AcpEventRenderer {
 
@@ -45,7 +47,7 @@ class ClaudeCodeRenderer(
     }
 
     // Shared context for all handlers
-    private val context = RenderContext(contentPanel, scrollCallback, agentKey, eventCallback)
+    private val context = RenderContext(contentPanel, scrollCallback, agentKey, project, eventCallback)
 
     // Task handler needs special handling for clear()
     private val taskHandler = TaskEventHandler()
