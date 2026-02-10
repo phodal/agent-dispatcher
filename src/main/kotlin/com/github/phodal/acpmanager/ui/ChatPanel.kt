@@ -221,22 +221,12 @@ class ChatPanel(
         inputToolbar.setSendEnabled(!state.isProcessing && state.isConnected)
         inputArea.isEnabled = !state.isProcessing && state.isConnected
 
-        // Update connection status in the selector
         val connectionStatus = when {
             state.error != null -> AgentConnectionStatus.ERROR
             state.isConnected -> AgentConnectionStatus.CONNECTED
             else -> AgentConnectionStatus.DISCONNECTED
         }
         inputToolbar.updateAgentStatus(session.agentKey, connectionStatus)
-
-        // Update status text
-        val statusText = when {
-            state.error != null -> "Error: ${state.error}"
-            !state.isConnected -> "Disconnected"
-            state.isProcessing -> "Processing..."
-            else -> "Connected"
-        }
-        inputToolbar.setStatusText(statusText)
     }
 
     private fun sendMessage() {
