@@ -9,8 +9,6 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.extensions.PluginId
 import javax.swing.Icon
 
 private val log = logger<SymbolMentionProvider>()
@@ -30,13 +28,8 @@ class SymbolMentionProvider(private val project: Project) : MentionProvider {
     override fun getMentionType(): MentionType = MentionType.SYMBOL
 
     override fun getMentions(query: String): List<MentionItem> {
-        // Check if Java plugin is available before attempting to extract symbols
-        if (!isJavaPluginAvailable()) {
-            log.debug("Java plugin not available, skipping symbol extraction")
-            return emptyList()
-        }
-
         // Wrap PSI access in ReadAction to avoid PsiInvalidAccessException
+        // Symbol extraction will gracefully handle missing Java plugin via reflection
         val symbols = com.intellij.openapi.application.ReadAction.compute<List<Symbol>, Exception> {
             val psiFile = getCurrentPsiFile() ?: return@compute emptyList()
             extractSymbols(psiFile)
@@ -56,16 +49,6 @@ class SymbolMentionProvider(private val project: Project) : MentionProvider {
         return itemsWithScores
             .sortedWith(compareBy({ -it.second }, { it.first.displayText.length }))
             .map { it.first }
-    }
-
-    private fun isJavaPluginAvailable(): Boolean {
-        return try {
-            val javaPluginId = PluginId.findId("com.intellij.java")
-            javaPluginId != null && PluginManagerCore.getPlugin(javaPluginId) != null
-        } catch (e: Exception) {
-            log.debug("Error checking Java plugin availability: ${e.message}")
-            false
-        }
     }
 
     private fun getCurrentPsiFile(): PsiFile? {
