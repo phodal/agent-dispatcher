@@ -12,6 +12,7 @@ import com.intellij.diff.contents.DiffContent
 import com.intellij.diff.contents.DocumentContent
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.util.DiffUserDataKeys
+import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.diff.util.Side
 import com.intellij.icons.AllIcons
 import com.intellij.lang.annotation.HighlightSeverity
@@ -23,6 +24,7 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
@@ -36,8 +38,13 @@ import com.intellij.util.messages.Topic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import java.awt.FlowLayout
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
+import javax.swing.BorderFactory
+import javax.swing.BoxLayout
+import javax.swing.JButton
+import javax.swing.JPanel
 import kotlin.time.Duration.Companion.seconds
 
 private val log = logger<IdeTools>()
@@ -79,6 +86,7 @@ class IdeTools(private val project: Project) {
     /**
      * Open multiple files in the editor.
      * Mirrors Claude Code's FileTools.open_files.
+     * Returns JSON with list of successfully opened files.
      */
     fun openFiles(filePaths: List<String>): ToolCallResult {
         val projectDir = getProjectDir() ?: return ToolCallResult.error("Project directory not found")
@@ -94,12 +102,15 @@ class IdeTools(private val project: Project) {
                 }
             }
         }
-        return ToolCallResult.ok(openedFiles.joinToString("\n"))
+        val result = OpenedFilesResults(openedFiles)
+        val jsonResult = json.encodeToString(OpenedFilesResults.serializer(), result)
+        return ToolCallResult.ok(jsonResult)
     }
 
     /**
      * Close a tab by file path or tab name.
      * Mirrors Claude Code's FileTools.close_tab.
+     * Supports both regular file tabs and diff editor tabs.
      */
     fun closeTab(tabName: String): ToolCallResult {
         if (!project.isOpen) return ToolCallResult.error("Project is closed")
@@ -107,6 +118,11 @@ class IdeTools(private val project: Project) {
         var found = false
         ApplicationManager.getApplication().invokeAndWait {
             val fileEditorManager = FileEditorManager.getInstance(project)
+
+            // First, try to close diff editors by tab name
+            closeDiffEditorsByTabName(tabName, fileEditorManager)
+
+            // Then, try to close regular file tabs
             val editors = fileEditorManager.allEditors
             val matchingEditor = editors.firstOrNull { editor ->
                 editor.file?.path == tabName ||
@@ -117,9 +133,12 @@ class IdeTools(private val project: Project) {
                 fileEditorManager.closeFile(matchingEditor.file!!)
                 found = true
             }
+
+            // Also dispose windows with matching title (for diff viewer windows)
+            disposeWindowsByTabName(tabName)
         }
 
-        return if (found) ToolCallResult.ok("OK") else ToolCallResult.error("Tab not found: $tabName")
+        return if (found) ToolCallResult.ok("closed") else ToolCallResult.ok("not_found")
     }
 
     /**
@@ -175,6 +194,12 @@ class IdeTools(private val project: Project) {
     /**
      * Open a diff view with original file vs proposed new content.
      * Mirrors Claude Code's DiffTools.openDiff with Accept/Reject UI.
+     *
+     * Features:
+     * - Custom bottom panel with Accept/Reject buttons
+     * - Auto-reject when diff is closed without action
+     * - Focus management (Apply button is default)
+     * - Keyboard shortcuts (Enter to accept, Esc to reject)
      *
      * Returns:
      * - "FILE_SAVED" + new content if accepted
@@ -256,13 +281,66 @@ class IdeTools(private val project: Project) {
 
                 // Add context actions
                 val actions = mutableListOf<AnAction>(rejectAction, acceptAction)
-                diffRequest.putUserData(
-                    com.intellij.diff.util.DiffUserDataKeysEx.CONTEXT_ACTIONS, actions
-                )
+                diffRequest.putUserData(DiffUserDataKeysEx.CONTEXT_ACTIONS, actions)
+
+                // Create bottom panel with JButton components
+                val rejectButton = JButton("Reject").apply {
+                    icon = AllIcons.Actions.Cancel
+                    maximumSize = preferredSize
+                    addActionListener {
+                        if (!actionApplied) {
+                            actionApplied = true
+                            result.complete(ToolCallResult.ok("DIFF_REJECTED"))
+                        }
+                    }
+                }
+
+                val acceptButton = JButton("Accept").apply {
+                    icon = AllIcons.Actions.Checked
+                    maximumSize = preferredSize
+                    addActionListener {
+                        if (!actionApplied) {
+                            actionApplied = true
+                            val updatedText = (proposedContent as? DocumentContent)?.document?.text
+                                ?: proposedFile.content.toString()
+                            val normalized = updatedText.replace("\r\n", "\n")
+                            result.complete(ToolCallResult.ok("FILE_SAVED", normalized))
+                        }
+                    }
+                }
+
+                // Button panel (horizontal layout)
+                val buttonPanel = JPanel(FlowLayout(FlowLayout.CENTER, 4, 0)).apply {
+                    add(rejectButton)
+                    add(acceptButton)
+                }
+
+                // Bottom panel (vertical layout with padding)
+                val bottomPanel = JPanel().apply {
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    border = BorderFactory.createEmptyBorder(0, 0, 10, 0)
+                    add(buttonPanel)
+                }
+
+                diffRequest.putUserData(DiffUserDataKeysEx.BOTTOM_PANEL, bottomPanel)
 
                 // Show diff
                 val chain = SimpleDiffRequestChain(diffRequest)
                 DiffManagerEx.getInstance().showDiffBuiltin(project, chain, DiffDialogHints.DEFAULT)
+
+                // Set up auto-reject on close listener
+                val connection = project.messageBus.connect()
+                connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+                    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                        // Check if this is the diff view being closed
+                        // If action hasn't been applied yet, auto-reject
+                        if (!actionApplied && (file.name.contains("Diff") || file.path.contains(oldFilePath))) {
+                            actionApplied = true
+                            result.complete(ToolCallResult.ok("DIFF_REJECTED"))
+                            connection.disconnect()
+                        }
+                    }
+                })
 
             } catch (e: Exception) {
                 log.warn("Error opening diff", e)
@@ -367,6 +445,61 @@ class IdeTools(private val project: Project) {
     }
 
     // ===== Helpers =====
+
+    /**
+     * Close diff editor tabs by matching the tab name against diff request names.
+     * Handles ChainDiffVirtualFile editors used by the diff viewer.
+     */
+    private fun closeDiffEditorsByTabName(tabName: String, fileEditorManager: FileEditorManager) {
+        try {
+            val editors = fileEditorManager.allEditors.toList()
+            for (editor in editors) {
+                val file = editor.file
+                // Check if this is a ChainDiffVirtualFile (diff editor)
+                if (file != null && file.javaClass.simpleName == "ChainDiffVirtualFile") {
+                    try {
+                        // Try to get the chain and first request name
+                        val chainMethod = file.javaClass.getMethod("getChain")
+                        val chain = chainMethod.invoke(file)
+                        if (chain != null) {
+                            val getRequestsMethod = chain.javaClass.getMethod("getRequests")
+                            @Suppress("UNCHECKED_CAST")
+                            val requests = getRequestsMethod.invoke(chain) as? List<Any>
+                            if (requests != null && requests.isNotEmpty()) {
+                                val firstRequest = requests[0]
+                                val getNameMethod = firstRequest.javaClass.getMethod("getName")
+                                val diffEditorName = getNameMethod.invoke(firstRequest) as? String
+                                if (diffEditorName == tabName) {
+                                    fileEditorManager.closeFile(file)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        log.debug("Error closing diff editor: ${e.message}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            log.debug("Error in closeDiffEditorsByTabName: ${e.message}")
+        }
+    }
+
+    /**
+     * Dispose windows (JFrames) with matching title.
+     * Used to close diff viewer windows opened by the IDE.
+     */
+    private fun disposeWindowsByTabName(tabName: String) {
+        try {
+            val windows = java.awt.Window.getWindows()
+            for (window in windows) {
+                if (window is javax.swing.JFrame && window.title == tabName) {
+                    window.dispose()
+                }
+            }
+        } catch (e: Exception) {
+            log.debug("Error disposing windows: ${e.message}")
+        }
+    }
 
     private fun getProjectDir(): Path? {
         val dir = project.guessProjectDir() ?: return null
