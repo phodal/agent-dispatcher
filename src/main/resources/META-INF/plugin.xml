@@ -32,5 +32,7 @@
         <projectService serviceImplementation="com.github.phodal.acpmanager.config.AcpConfigService"/>
         <projectService serviceImplementation="com.github.phodal.acpmanager.acp.AcpSessionManager"/>
         <projectService serviceImplementation="com.github.phodal.acpmanager.ide.IdeAcpClient"/>
+
+        <consoleFilterProvider implementation="com.github.phodal.acpmanager.ide.TerminalIntegration"/>
     </extensions>
 </idea-plugin>
