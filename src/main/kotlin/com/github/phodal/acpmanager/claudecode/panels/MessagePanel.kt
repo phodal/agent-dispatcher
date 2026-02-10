@@ -63,5 +63,10 @@ class MessagePanel(
         val pref = preferredSize
         return Dimension(Int.MAX_VALUE, pref.height)
     }
+
+    override fun getMinimumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(0, pref.height)
+    }
 }
 

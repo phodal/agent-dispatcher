@@ -84,6 +84,16 @@ class StreamingPanel(
         revalidate()
         repaint()
     }
+
+    override fun getMaximumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(Int.MAX_VALUE, pref.height)
+    }
+
+    override fun getMinimumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(0, pref.height)
+    }
 }
 
 /**
@@ -187,6 +197,16 @@ class ToolCallPanel(
 
         revalidate()
         repaint()
+    }
+
+    override fun getMaximumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(Int.MAX_VALUE, pref.height)
+    }
+
+    override fun getMinimumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(0, pref.height)
     }
 }
 

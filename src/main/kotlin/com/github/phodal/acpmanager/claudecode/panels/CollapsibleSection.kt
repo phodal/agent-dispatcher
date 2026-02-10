@@ -81,9 +81,20 @@ class CollapsibleSection(
         expanded = !expanded
         headerLabel.text = getHeaderText()
         scrollPane.isVisible = expanded
+
+        // Force recalculation of sizes - critical for proper collapse behavior
+        invalidate()
         revalidate()
         repaint()
-        parent?.revalidate()
+
+        // Propagate layout changes up the hierarchy
+        var p = parent
+        while (p != null) {
+            p.invalidate()
+            p.revalidate()
+            p.repaint()
+            p = p.parent
+        }
     }
 
     /**
@@ -105,6 +116,11 @@ class CollapsibleSection(
     override fun getMaximumSize(): Dimension {
         val pref = preferredSize
         return Dimension(Int.MAX_VALUE, pref.height)
+    }
+
+    override fun getMinimumSize(): Dimension {
+        val pref = preferredSize
+        return Dimension(0, pref.height)
     }
 }
 

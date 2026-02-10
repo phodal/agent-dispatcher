@@ -324,8 +324,8 @@ class DefaultAcpEventRenderer(
 
     private fun addPanel(panel: JPanel) {
         panel.alignmentX = Component.LEFT_ALIGNMENT
-        // Set maximum size to prevent vertical stretching
-        panel.maximumSize = Dimension(Int.MAX_VALUE, panel.preferredSize.height)
+        // Note: We don't set fixed maximumSize here to allow
+        // collapsible panels to dynamically resize when toggled.
         contentPanel.add(panel)
         contentPanel.add(Box.createVerticalStrut(2))
         contentPanel.revalidate()

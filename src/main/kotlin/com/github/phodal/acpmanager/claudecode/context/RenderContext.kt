@@ -30,12 +30,11 @@ class RenderContext(
 
     /**
      * Add a panel to the content panel.
+     * Note: We don't set fixed maximumSize/minimumSize here to allow
+     * collapsible panels to dynamically resize when toggled.
      */
     fun addPanel(panel: JPanel) {
         panel.alignmentX = java.awt.Component.LEFT_ALIGNMENT
-        val prefHeight = panel.preferredSize.height
-        panel.maximumSize = java.awt.Dimension(Int.MAX_VALUE, prefHeight)
-        panel.minimumSize = java.awt.Dimension(0, prefHeight)
         contentPanel.add(panel)
         contentPanel.revalidate()
         contentPanel.repaint()
@@ -43,12 +42,11 @@ class RenderContext(
 
     /**
      * Insert a panel at a specific index.
+     * Note: We don't set fixed maximumSize/minimumSize here to allow
+     * collapsible panels to dynamically resize when toggled.
      */
     fun insertPanel(panel: JPanel, index: Int) {
         panel.alignmentX = java.awt.Component.LEFT_ALIGNMENT
-        val prefHeight = panel.preferredSize.height
-        panel.maximumSize = java.awt.Dimension(Int.MAX_VALUE, prefHeight)
-        panel.minimumSize = java.awt.Dimension(0, prefHeight)
         contentPanel.add(panel, index)
         contentPanel.revalidate()
         contentPanel.repaint()

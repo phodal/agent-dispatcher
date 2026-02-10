@@ -77,14 +77,32 @@ abstract class BaseCollapsiblePanel(
     protected open fun updateExpandedState() {
         headerIcon.text = getExpandIcon()
         contentPanel.isVisible = isExpanded
+
+        // Force recalculation of sizes - this is critical for proper collapse behavior
+        invalidate()
         revalidate()
         repaint()
-        parent?.revalidate()
+
+        // Propagate layout changes up the hierarchy
+        var p = parent
+        while (p != null) {
+            p.invalidate()
+            p.revalidate()
+            p.repaint()
+            p = p.parent
+        }
     }
 
     override fun getMaximumSize(): Dimension {
+        // Always return dynamic height based on current preferred size
         val pref = preferredSize
         return Dimension(Int.MAX_VALUE, pref.height)
+    }
+
+    override fun getMinimumSize(): Dimension {
+        // Minimum size should also be dynamic
+        val pref = preferredSize
+        return Dimension(0, pref.height)
     }
 
     /**
