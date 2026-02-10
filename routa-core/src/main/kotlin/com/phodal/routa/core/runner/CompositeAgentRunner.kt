@@ -7,18 +7,10 @@ import com.phodal.routa.core.model.AgentRole
  *
  * Default strategy:
  * - **ROUTA** (coordinator): Uses Koog LLM for planning (text output with @@@task blocks)
- * - **CRAFTER** (implementor): Uses ACP to spawn a real coding agent that can edit files
- * - **GATE** (verifier): Uses Koog LLM for verification (reviews conversations)
+ * - **CRAFTER** (implementor): Uses ACP to spawn a real coding agent
+ * - **GATE** (verifier): Uses ACP agent for verification (can read files, run tests)
  *
  * When no ACP agent is configured, falls back to Koog for all roles.
- *
- * Usage:
- * ```kotlin
- * val runner = CompositeAgentRunner(
- *     koogRunner = KoogAgentRunner(tools, workspace),
- *     acpRunner = AcpAgentRunner("codex", config, cwd),
- * )
- * ```
  */
 class CompositeAgentRunner(
     private val koogRunner: AgentRunner,
@@ -27,9 +19,9 @@ class CompositeAgentRunner(
 
     override suspend fun run(role: AgentRole, agentId: String, prompt: String): String {
         val runner = when (role) {
-            AgentRole.ROUTA -> koogRunner    // Plans via LLM
-            AgentRole.CRAFTER -> acpRunner ?: koogRunner  // Real agent or fallback to LLM
-            AgentRole.GATE -> koogRunner     // Verifies via LLM
+            AgentRole.ROUTA -> koogRunner          // Plans via LLM (text output)
+            AgentRole.CRAFTER -> acpRunner ?: koogRunner  // Real agent or fallback
+            AgentRole.GATE -> acpRunner ?: koogRunner     // Real agent for verification too
         }
 
         return runner.run(role, agentId, prompt)

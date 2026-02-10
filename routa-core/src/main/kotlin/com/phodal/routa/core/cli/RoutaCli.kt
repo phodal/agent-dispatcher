@@ -65,8 +65,18 @@ fun main(args: Array<String>) {
     }
     println()
 
-    // Resolve CWD
-    val cwd = if (args.isNotEmpty()) args[0] else System.getProperty("user.dir") ?: "."
+    // Resolve CWD and crafter override
+    var cwd = System.getProperty("user.dir") ?: "."
+    var crafterOverride: String? = null
+    var i = 0
+    while (i < args.size) {
+        when (args[i]) {
+            "--cwd" -> { i++; if (i < args.size) cwd = args[i] }
+            "--crafter" -> { i++; if (i < args.size) crafterOverride = args[i] }
+            else -> cwd = args[i]
+        }
+        i++
+    }
     println("  Working directory: $cwd")
     println()
 
@@ -74,7 +84,7 @@ fun main(args: Array<String>) {
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // Build the runner
-    val runner = buildRunner(scope, cwd)
+    val runner = buildRunner(scope, cwd, crafterOverride)
 
     println("Enter your requirement (or 'quit' to exit):")
     println("─".repeat(50))
@@ -114,16 +124,37 @@ fun main(args: Array<String>) {
 
 /**
  * Build the appropriate runner based on config:
- * - If ACP agent is configured → CompositeAgentRunner (Koog for ROUTA/GATE, ACP for CRAFTER)
- * - Otherwise → KoogAgentRunner for all roles
+ * - Claude detected → CompositeAgentRunner (Koog for ROUTA, Claude for CRAFTER+GATE)
+ * - Other ACP agent → CompositeAgentRunner (Koog for ROUTA, ACP for CRAFTER+GATE)
+ * - No ACP → KoogAgentRunner for all roles
  */
-private fun buildRunner(scope: CoroutineScope, cwd: String): AgentRunner {
+private fun buildRunner(scope: CoroutineScope, cwd: String, crafterOverride: String? = null): AgentRunner {
     val routa = RoutaFactory.createInMemory(scope)
     val koogRunner = KoogAgentRunner(routa.tools, "cli-workspace")
 
-    val crafterInfo = RoutaConfigLoader.getActiveCrafterConfig()
+    // If a specific crafter is requested, look it up
+    val crafterInfo = if (crafterOverride != null) {
+        val agents = RoutaConfigLoader.getAcpAgents()
+        val agent = agents[crafterOverride]
+        if (agent != null) crafterOverride to agent else null
+    } else {
+        RoutaConfigLoader.getActiveCrafterConfig()
+    }
     if (crafterInfo != null) {
         val (agentKey, agentConfig) = crafterInfo
+
+        // Claude Code uses its own CLI protocol (not standard ACP)
+        val isClaudeCode = agentConfig.command.contains("claude")
+        if (isClaudeCode) {
+            val claudeRunner = ClaudeAgentRunner(
+                claudePath = agentConfig.command,
+                cwd = cwd,
+                onOutput = { text -> print(text) },
+            )
+            return CompositeAgentRunner(koogRunner = koogRunner, acpRunner = claudeRunner)
+        }
+
+        // Standard ACP agent
         val acpRunner = AcpAgentRunner(
             agentKey = agentKey,
             config = agentConfig,

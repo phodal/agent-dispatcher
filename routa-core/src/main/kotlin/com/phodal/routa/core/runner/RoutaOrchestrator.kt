@@ -183,20 +183,6 @@ class RoutaOrchestrator(
      */
     private fun injectAgentIdentity(prompt: String, agentId: String, taskId: String): String {
         return buildString {
-            appendLine("## Your Identity")
-            appendLine()
-            appendLine("- **Your Agent ID**: `$agentId`")
-            appendLine("- **Your Task ID**: `$taskId`")
-            appendLine("- **Workspace**: `$workspaceId`")
-            appendLine()
-            appendLine("When calling `report_to_parent`, use agentId=`$agentId` and taskId=`$taskId`.")
-            appendLine()
-            appendLine("**IMPORTANT**: You are a text-based agent. You do NOT have access to a file system")
-            appendLine("or shell commands. Focus on describing what SHOULD be implemented, then call")
-            appendLine("`report_to_parent` with your findings/output.")
-            appendLine()
-            appendLine("---")
-            appendLine()
             append(prompt)
         }
     }

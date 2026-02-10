@@ -126,14 +126,53 @@ object RoutaConfigLoader {
 
         val content = configFile.readText()
 
-        // Try full parse first
+        // Try full parse first (routa-native format with args as list)
         try {
             return yaml.decodeFromString(RoutaConfigFile.serializer(), content)
         } catch (_: Exception) {
-            // Fall through to minimal parse
+            // Fall through
         }
 
-        // Fallback: parse only LLM config (acpAgents format may differ from xiuper)
+        // Fallback: parse with xiuper-format acpAgents (args as string)
+        try {
+            @Serializable
+            data class XiuperAcpAgent(
+                val command: String = "",
+                val args: String = "",
+                val env: String = "",
+                val name: String = "",
+            )
+
+            @Serializable
+            data class XiuperConfig(
+                val active: String = "",
+                val configs: List<NamedModelConfig> = emptyList(),
+                val acpAgents: Map<String, XiuperAcpAgent> = emptyMap(),
+                val activeAcpAgent: String? = null,
+            )
+
+            val xiuper = yaml.decodeFromString(XiuperConfig.serializer(), content)
+
+            // Convert xiuper acpAgents to routa format
+            val acpAgents = xiuper.acpAgents.mapValues { (_, v) ->
+                AcpAgentConfig(
+                    command = v.command,
+                    args = v.args.trim().split("\\s+".toRegex()).filter { it.isNotBlank() },
+                    name = v.name,
+                )
+            }
+
+            return RoutaConfigFile(
+                active = xiuper.active,
+                configs = xiuper.configs,
+                acpAgents = acpAgents,
+                activeCrafter = xiuper.activeAcpAgent,
+            )
+        } catch (_: Exception) {
+            // Fall through
+        }
+
+        // Final fallback: parse only LLM config
         try {
             @Serializable
             data class MinimalConfig(
@@ -176,9 +215,20 @@ object RoutaConfigLoader {
      */
     fun getActiveCrafterConfig(): Pair<String, AcpAgentConfig>? {
         val config = load()
-        val key = config.activeCrafter ?: return config.acpAgents.entries.firstOrNull()?.toPair()
-        val agentConfig = config.acpAgents[key] ?: return null
-        return key to agentConfig
+        val agents = config.acpAgents.filter { it.value.isConfigured() }
+        if (agents.isEmpty()) return null
+
+        // Prefer explicitly set activeCrafter
+        val key = config.activeCrafter
+        if (key != null && agents.containsKey(key)) {
+            return key to agents.getValue(key)
+        }
+
+        // Prefer claude if available
+        val claudeEntry = agents.entries.find { it.value.command.contains("claude") }
+        if (claudeEntry != null) return claudeEntry.toPair()
+
+        return agents.entries.firstOrNull()?.toPair()
     }
 
     /**
