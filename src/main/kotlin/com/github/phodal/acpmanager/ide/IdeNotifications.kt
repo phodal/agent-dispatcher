@@ -71,6 +71,8 @@ class IdeNotifications(
         endLine: Int,
         endColumn: Int,
         selectedText: String?,
+        cursorOffset: Int = 0,
+        fileType: String? = null,
     ) {
         broadcastNotification(
             IdeNotification.SelectionChanged(
@@ -80,6 +82,8 @@ class IdeNotifications(
                 endLine = endLine,
                 endColumn = endColumn,
                 selectedText = selectedText,
+                cursorOffset = cursorOffset,
+                fileType = fileType,
             )
         )
     }
@@ -102,5 +106,71 @@ class IdeNotifications(
      */
     fun sendDiagnosticsChanged(uri: String) {
         broadcastNotification(IdeNotification.DiagnosticsChanged(uri))
+    }
+
+    /**
+     * Capture current editor context (file path and selection range).
+     * Returns null if no editor is currently active.
+     */
+    fun captureEditorContext(): EditorContext? {
+        return EditorContextCapture.captureCurrentEditorContext(project)
+    }
+}
+
+/**
+ * Represents the current editor context (file and selection).
+ */
+data class EditorContext(
+    val filePath: String,
+    val startLine: Int? = null,
+    val endLine: Int? = null,
+    val selectedText: String? = null,
+)
+
+/**
+ * Utility for capturing editor context.
+ */
+object EditorContextCapture {
+    private val log = logger<EditorContextCapture>()
+
+    /**
+     * Capture the current editor's file path and selection range.
+     */
+    fun captureCurrentEditorContext(project: Project): EditorContext? {
+        return try {
+            val fileEditorManager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+            val selectedEditor = fileEditorManager.selectedTextEditor
+
+            if (selectedEditor != null) {
+                val virtualFile = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                    .getFile(selectedEditor.document)
+                val filePath = virtualFile?.path ?: return null
+
+                val selectionModel = selectedEditor.selectionModel
+                val startPosition = selectedEditor.offsetToLogicalPosition(selectionModel.selectionStart)
+                val endPosition = selectedEditor.offsetToLogicalPosition(selectionModel.selectionEnd)
+
+                // Only include line numbers if there's an actual selection
+                val startLine = if (startPosition.line != endPosition.line ||
+                                    startPosition.column != endPosition.column) {
+                    startPosition.line
+                } else {
+                    null
+                }
+                val endLine = if (startLine != null) endPosition.line else null
+
+                EditorContext(
+                    filePath = filePath,
+                    startLine = startLine,
+                    endLine = endLine,
+                    selectedText = selectionModel.selectedText,
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            log.debug("Error capturing editor context: ${e.message}")
+            null
+        }
     }
 }

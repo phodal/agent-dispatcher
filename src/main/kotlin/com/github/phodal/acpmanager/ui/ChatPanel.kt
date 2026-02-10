@@ -3,6 +3,7 @@ package com.github.phodal.acpmanager.ui
 import com.github.phodal.acpmanager.acp.AgentSession
 import com.github.phodal.acpmanager.acp.AgentSessionState
 import com.github.phodal.acpmanager.config.AcpConfigService
+import com.github.phodal.acpmanager.ide.IdeAcpClient
 import com.github.phodal.acpmanager.ui.renderer.AcpEventRenderer
 import com.github.phodal.acpmanager.ui.renderer.AcpEventRendererRegistry
 import com.github.phodal.acpmanager.ui.renderer.DefaultRendererFactory
@@ -182,6 +183,9 @@ class ChatPanel(
         log.info("sendMessage called for agent '${session.agentKey}' with text length=${text.length}")
         inputArea.text = ""
 
+        // Check for @ mentions and send at-mention notification if detected
+        detectAndSendAtMention(text)
+
         scope.launch(Dispatchers.IO) {
             try {
                 // Ensure connected before sending
@@ -212,6 +216,35 @@ class ChatPanel(
                     inputToolbar.setStatusText("Error: ${e.message}")
                 }
             }
+        }
+    }
+
+    /**
+     * Detect @ mentions in the message and send at-mention notification if found.
+     */
+    private fun detectAndSendAtMention(text: String) {
+        // Simple @ mention detection: look for @ followed by word characters
+        if (!text.contains("@")) return
+
+        try {
+            val ideClient = IdeAcpClient.getInstance(project)
+            val context = ideClient.ideNotifications.captureEditorContext()
+
+            if (context != null) {
+                log.info("At-mention detected in message, sending notification for file: ${context.filePath}")
+                ideClient.ideNotifications.sendAtMentioned(
+                    filePath = context.filePath,
+                    startLine = context.startLine,
+                    endLine = context.endLine
+                )
+
+                // Show visual feedback
+                ApplicationManager.getApplication().invokeLater {
+                    inputToolbar.setStatusText("Context shared: ${context.filePath}")
+                }
+            }
+        } catch (e: Exception) {
+            log.debug("Error detecting at-mention: ${e.message}")
         }
     }
 
