@@ -114,27 +114,33 @@ class DispatcherPanel(
             background = JBColor(0x0D1117, 0x0D1117)
         }
 
-        // DAG sections stacked vertically
-        val dagPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
+        // Create resizable DAG sections using nested JSplitPanes
+        // ROUTA + CRAFTERs split
+        val routaCrafterSplit = JSplitPane(JSplitPane.VERTICAL_SPLIT).apply {
+            topComponent = routaSection
+            bottomComponent = crafterSection
+            dividerLocation = 120  // ROUTA starts compact
+            resizeWeight = 0.2     // ROUTA gets 20% of extra space
+            border = JBUI.Borders.empty()
+            dividerSize = 4
+            isContinuousLayout = true
         }
 
-        dagPanel.add(routaSection)
-        dagPanel.add(crafterSection)
-        dagPanel.add(gateSection)
+        // (ROUTA + CRAFTERs) + GATE split
+        val dagSplitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT).apply {
+            topComponent = routaCrafterSplit
+            bottomComponent = gateSection
+            dividerLocation = 400  // GATE starts small at bottom
+            resizeWeight = 0.85    // Top section gets 85% of extra space, GATE stays small
+            border = JBUI.Borders.empty()
+            dividerSize = 4
+            isContinuousLayout = true
+        }
 
         // Input area at the bottom
         val inputPanel = createInputPanel()
 
-        // Scrollable DAG area
-        val scrollPane = JScrollPane(dagPanel).apply {
-            border = JBUI.Borders.empty()
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        }
-
-        mainPanel.add(scrollPane, BorderLayout.CENTER)
+        mainPanel.add(dagSplitPane, BorderLayout.CENTER)
         mainPanel.add(inputPanel, BorderLayout.SOUTH)
 
         setContent(mainPanel)
@@ -273,8 +279,19 @@ class DispatcherPanel(
             add(stopButton, "stop")
         }
 
+        // Agent selector panel (left of input)
+        val agentSelectorPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            isOpaque = false
+            add(JBLabel("Agent:").apply {
+                foreground = JBColor(0x8B949E, 0x8B949E)
+                font = font.deriveFont(10f)
+            })
+            add(routaSection.getModelCombo())
+        }
+
         val topRow = JPanel(BorderLayout()).apply {
             isOpaque = false
+            add(agentSelectorPanel, BorderLayout.WEST)
             add(inputScroll, BorderLayout.CENTER)
             add(buttonPanel, BorderLayout.EAST)
         }

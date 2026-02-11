@@ -106,6 +106,9 @@ class GateSectionPanel : JPanel(BorderLayout()) {
             JBUI.Borders.customLineBottom(JBColor(0x21262D, 0x21262D)),
             JBUI.Borders.empty(4, 12)
         )
+        // Set compact size when collapsed (before DAG reaches GATE)
+        minimumSize = Dimension(0, 40)
+        preferredSize = Dimension(0, 50)
 
         // Header row
         val headerPanel = JPanel(BorderLayout()).apply {
@@ -157,12 +160,21 @@ class GateSectionPanel : JPanel(BorderLayout()) {
      * Update the gate status (active/inactive).
      */
     fun updateStatus(active: Boolean) {
-        if (active) {
-            statusLabel.text = "VERIFYING"
-            statusLabel.foreground = GATE_ACCENT
-        } else {
-            statusLabel.text = "INACTIVE"
-            statusLabel.foreground = INACTIVE_COLOR
+        SwingUtilities.invokeLater {
+            if (active) {
+                statusLabel.text = "VERIFYING"
+                statusLabel.foreground = GATE_ACCENT
+                // Expand when active
+                preferredSize = Dimension(0, 150)
+            } else {
+                statusLabel.text = "INACTIVE"
+                statusLabel.foreground = INACTIVE_COLOR
+                // Stay compact when inactive
+                if (!expanded) {
+                    preferredSize = Dimension(0, 50)
+                }
+            }
+            revalidate()
         }
     }
 

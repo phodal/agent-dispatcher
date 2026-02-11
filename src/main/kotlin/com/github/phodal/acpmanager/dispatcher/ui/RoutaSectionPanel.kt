@@ -140,20 +140,9 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
             add(outputScroll, BorderLayout.CENTER)
         }
 
-        // Bottom panel: model selector + DAG connector
+        // Bottom panel: DAG connector only (model selector moved to input area)
         val bottomPanel = JPanel(BorderLayout()).apply {
             isOpaque = false
-
-            // Model selector on the left
-            val modelPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-                isOpaque = false
-                add(JBLabel("LLM Model:").apply {
-                    foreground = JBColor(0x8B949E, 0x8B949E)
-                    font = font.deriveFont(10f)
-                })
-                add(modelCombo)
-            }
-            add(modelPanel, BorderLayout.WEST)
 
             // DAG connector in the center
             dagConnector.add(createDagArrow())
@@ -183,7 +172,7 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
     }
 
     /**
-     * Set available LLM models for ROUTA (from ~/.autodev/config.yaml).
+     * Set available agents for ROUTA (from ~/.acp-manager/config.yaml).
      */
     fun setAvailableModels(models: List<String>) {
         modelCombo.removeAllItems()
@@ -191,11 +180,16 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
     }
 
     /**
-     * Set the selected LLM model.
+     * Set the selected agent.
      */
     fun setSelectedModel(model: String) {
         modelCombo.selectedItem = model
     }
+
+    /**
+     * Get the model combo component for external placement.
+     */
+    fun getModelCombo(): JComboBox<String> = modelCombo
 
     /**
      * Set the MCP server URL to display.
