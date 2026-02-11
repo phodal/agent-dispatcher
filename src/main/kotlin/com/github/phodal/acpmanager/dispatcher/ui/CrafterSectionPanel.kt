@@ -38,6 +38,13 @@ class CrafterSectionPanel : JPanel(BorderLayout()) {
         font = font.deriveFont(10f)
     }
 
+    private val mcpUrlLabel = JBLabel("").apply {
+        foreground = JBColor(0x58A6FF, 0x58A6FF)  // blue link-style
+        font = font.deriveFont(9f)
+        toolTipText = "MCP Server SSE endpoint for Claude Code coordination tools"
+        isVisible = false
+    }
+
     private val modelCombo = JComboBox<String>().apply {
         preferredSize = Dimension(160, 24)
         font = font.deriveFont(11f)
@@ -78,6 +85,7 @@ class CrafterSectionPanel : JPanel(BorderLayout()) {
                 })
                 add(JBLabel("│").apply { foreground = JBColor(0x30363D, 0x30363D) })
                 add(activeCountLabel)
+                add(mcpUrlLabel)
             }
             add(leftPanel, BorderLayout.WEST)
 
@@ -119,6 +127,21 @@ class CrafterSectionPanel : JPanel(BorderLayout()) {
         modelCombo.addActionListener {
             val selected = modelCombo.selectedItem as? String ?: return@addActionListener
             onModelChanged(selected)
+        }
+    }
+
+    /**
+     * Set the MCP server URL to display.
+     */
+    fun setMcpServerUrl(url: String?) {
+        SwingUtilities.invokeLater {
+            if (url != null) {
+                mcpUrlLabel.text = "│ MCP: $url"
+                mcpUrlLabel.isVisible = true
+            } else {
+                mcpUrlLabel.text = ""
+                mcpUrlLabel.isVisible = false
+            }
         }
     }
 
@@ -200,6 +223,8 @@ class CrafterSectionPanel : JPanel(BorderLayout()) {
             tabbedPane.removeAll()
             detailPanels.clear()
             activeCountLabel.text = "0 active"
+            mcpUrlLabel.text = ""
+            mcpUrlLabel.isVisible = false
             tabbedPane.addTab("No CRAFTERs yet", JPanel(GridBagLayout()).apply {
                 isOpaque = false
                 add(JBLabel("Waiting for ROUTA to plan tasks...").apply {

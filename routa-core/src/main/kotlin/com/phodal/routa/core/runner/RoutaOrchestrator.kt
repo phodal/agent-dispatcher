@@ -87,7 +87,14 @@ class RoutaOrchestrator(
             appendLine("Use the @@@task ... @@@ format as specified in your instructions.")
         }
 
-        val planOutput = runner.run(AgentRole.ROUTA, routaAgentId, planPrompt)
+        // Use streaming for ROUTA planning if provider supports it
+        val planOutput = if (provider != null) {
+            provider.runStreaming(AgentRole.ROUTA, routaAgentId, planPrompt) { chunk ->
+                onStreamChunk?.invoke(routaAgentId, chunk)
+            }
+        } else {
+            runner.run(AgentRole.ROUTA, routaAgentId, planPrompt)
+        }
 
         emitPhase(OrchestratorPhase.PlanReady(planOutput))
 

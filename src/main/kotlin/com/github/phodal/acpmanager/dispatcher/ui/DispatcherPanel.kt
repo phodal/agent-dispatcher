@@ -279,6 +279,13 @@ class DispatcherPanel(
             }
         }
 
+        // Observe MCP server URL
+        scope.launch {
+            routaService.mcpServerUrl.collectLatest { url ->
+                crafterSection.setMcpServerUrl(url)
+            }
+        }
+
         // Observe running state (for UI enable/disable)
         scope.launch {
             routaService.isRunning.collectLatest { running ->

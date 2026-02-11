@@ -83,6 +83,10 @@ class AgentSession(
     private var isClaudeCodeMode = false
     private var routaMcpServer: RoutaMcpWebSocketServer? = null
 
+    /** The SSE URL of the Routa MCP server, if running. */
+    val mcpServerUrl: String?
+        get() = routaMcpServer?.let { if (it.isRunning) "http://${"127.0.0.1"}:${it.port}/sse" else null }
+
     private val _state = MutableStateFlow(AgentSessionState(agentKey))
     val state: StateFlow<AgentSessionState> = _state.asStateFlow()
 

@@ -1,5 +1,6 @@
 package com.github.phodal.acpmanager.dispatcher.routa
 
+import com.github.phodal.acpmanager.acp.AcpSessionManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -91,6 +92,10 @@ class IdeaRoutaService(private val project: Project) : Disposable {
     val crafterModelKey = MutableStateFlow("")
     val routaModelKey = MutableStateFlow("")
     val gateModelKey = MutableStateFlow("")
+
+    private val _mcpServerUrl = MutableStateFlow<String?>(null)
+    /** The MCP server SSE URL exposed to Claude Code, if running. */
+    val mcpServerUrl: StateFlow<String?> = _mcpServerUrl.asStateFlow()
 
     // ── Public API ──────────────────────────────────────────────────────
 
@@ -194,6 +199,7 @@ class IdeaRoutaService(private val project: Project) : Disposable {
         routaSystem?.coordinator?.reset()
         routaSystem = null
         orchestrator = null
+        _mcpServerUrl.value = null
 
         scope.launch {
             provider?.shutdown()
@@ -232,6 +238,9 @@ class IdeaRoutaService(private val project: Project) : Disposable {
                         status = AgentStatus.ACTIVE,
                     )
                 }
+
+                // Expose MCP server URL if running
+                refreshMcpServerUrl()
             }
 
             is OrchestratorPhase.CrafterCompleted -> {
@@ -249,7 +258,18 @@ class IdeaRoutaService(private val project: Project) : Disposable {
     }
 
     private fun handleStreamChunk(agentId: String, chunk: StreamChunk) {
-        val role = agentRoleMap[agentId]
+        // Try to get role from cache
+        // If not found, check if this is the ROUTA agent from coordination state
+        val role = agentRoleMap[agentId] ?: run {
+            val state = routaSystem?.coordinator?.coordinationState?.value
+            when {
+                state?.routaAgentId == agentId -> {
+                    agentRoleMap[agentId] = AgentRole.ROUTA
+                    AgentRole.ROUTA
+                }
+                else -> null
+            }
+        }
 
         when (role) {
             AgentRole.ROUTA -> _routaChunks.tryEmit(chunk)
@@ -270,7 +290,7 @@ class IdeaRoutaService(private val project: Project) : Disposable {
             }
 
             null -> {
-                // Unknown agent — try to determine role from event
+                // Unknown agent — log and skip
                 log.debug("Stream chunk for unknown agent $agentId, skipping routing")
             }
         }
@@ -304,6 +324,17 @@ class IdeaRoutaService(private val project: Project) : Disposable {
 
             else -> {}
         }
+    }
+
+    private fun refreshMcpServerUrl() {
+        val sessionManager = AcpSessionManager.getInstance(project)
+        // Find any active session with a running MCP server
+        // Session keys follow the "routa-{agentId.take(8)}" pattern from IdeaAcpAgentProvider
+        val url = crafterTaskMap.keys.firstNotNullOfOrNull { agentId ->
+            val sessionKey = "routa-${agentId.take(8)}"
+            sessionManager.getSession(sessionKey)?.mcpServerUrl
+        }
+        _mcpServerUrl.value = url
     }
 
     private fun updateCrafterState(agentId: String, updater: (CrafterStreamState) -> CrafterStreamState) {
