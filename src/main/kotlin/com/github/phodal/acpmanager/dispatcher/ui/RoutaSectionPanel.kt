@@ -101,7 +101,7 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
             JBUI.Borders.empty(6, 12)
         )
 
-        // Header row
+        // Header row - simplified, only toggle and preview
         val headerPanel = JPanel(BorderLayout()).apply {
             isOpaque = false
 
@@ -116,14 +116,9 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
             }
             add(leftPanel, BorderLayout.WEST)
 
+            // Status indicator on the right
             val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
                 isOpaque = false
-                add(JBLabel("LLM:").apply {
-                    foreground = JBColor(0x8B949E, 0x8B949E)
-                    font = font.deriveFont(10f)
-                })
-                add(modelCombo)
-                add(JBLabel("│").apply { foreground = JBColor(0x30363D, 0x30363D) })
                 add(statusDot)
                 add(phaseLabel)
             }
@@ -137,12 +132,29 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
             add(outputScroll, BorderLayout.CENTER)
         }
 
+        // Bottom panel: model selector + DAG connector
+        val bottomPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+
+            // Model selector on the left
+            val modelPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                isOpaque = false
+                add(JBLabel("LLM Model:").apply {
+                    foreground = JBColor(0x8B949E, 0x8B949E)
+                    font = font.deriveFont(10f)
+                })
+                add(modelCombo)
+            }
+            add(modelPanel, BorderLayout.WEST)
+
+            // DAG connector in the center
+            dagConnector.add(createDagArrow())
+            add(dagConnector, BorderLayout.CENTER)
+        }
+
         add(headerPanel, BorderLayout.NORTH)
         add(centerPanel, BorderLayout.CENTER)
-
-        // DAG connector at bottom
-        dagConnector.add(createDagArrow())
-        add(dagConnector, BorderLayout.SOUTH)
+        add(bottomPanel, BorderLayout.SOUTH)
 
         // Toggle
         toggleLabel.addMouseListener(object : MouseAdapter() {
