@@ -2,8 +2,10 @@ package com.github.phodal.acpmanager.dispatcher.ui
 
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.github.phodal.acpmanager.dispatcher.routa.IdeaRoutaService
+import com.github.phodal.acpmanager.services.CoroutineScopeHolder
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -51,7 +53,8 @@ class DispatcherPanel(
     private val project: Project,
 ) : SimpleToolWindowPanel(true, true), Disposable {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scopeHolder = CoroutineScopeHolder.getInstance(project)
+    private val scope = scopeHolder.createScope("DispatcherPanel")
     private val configService = AcpConfigService.getInstance(project)
     private val routaService = IdeaRoutaService.getInstance(project)
 
@@ -188,13 +191,16 @@ class DispatcherPanel(
     private fun loadAgents() {
         scope.launch(Dispatchers.IO) {
             try {
+                log.info("Loading ACP agents...")
                 configService.reloadConfig()
                 val config = configService.loadConfig()
                 val agentKeys = config.agents.keys.toList()
 
-                withContext(Dispatchers.Main) {
+                withContext(Dispatchers.EDT) {
                     if (agentKeys.isEmpty()) {
-                        routaSection.setPlanningText("No ACP agents detected. Configure agents in ~/.acp-manager/config.yaml")
+                        val msg = "⚠️ No ACP agents detected. Configure agents in ~/.acp-manager/config.yaml"
+                        log.warn(msg)
+                        routaSection.setPlanningText(msg)
                         return@withContext
                     }
 
@@ -205,19 +211,24 @@ class DispatcherPanel(
                     if (defaultAgent != null) {
                         crafterSection.setSelectedModel(defaultAgent)
                         // Initialize the Routa service with the default agent
+                        log.info("Initializing Routa service with agent: $defaultAgent")
                         routaService.initialize(
                             crafterAgent = defaultAgent,
                             routaAgent = defaultAgent,
                             gateAgent = defaultAgent,
                         )
+                        routaSection.setPlanningText("✓ Ready. Using agent: $defaultAgent")
+                    } else {
+                        log.warn("No default agent found")
+                        routaSection.setPlanningText("⚠️ No default agent configured")
                     }
 
                     log.info("Dispatcher ready. ${agentKeys.size} agent(s): ${agentKeys.joinToString(", ")}")
                 }
             } catch (e: Exception) {
                 log.warn("Failed to load agents: ${e.message}", e)
-                withContext(Dispatchers.Main) {
-                    routaSection.setPlanningText("Failed to load agents: ${e.message}")
+                withContext(Dispatchers.EDT) {
+                    routaSection.setPlanningText("❌ Failed to load agents: ${e.message}")
                 }
             }
         }
@@ -340,6 +351,13 @@ class DispatcherPanel(
     private fun startExecution(userInput: String) {
         if (routaService.isRunning.value) {
             log.info("Already running, ignoring request")
+            return
+        }
+
+        // Check if service is initialized
+        if (!routaService.isInitialized()) {
+            log.warn("Service not initialized yet, please wait for agents to load")
+            routaSection.setPlanningText("⚠️ Service not initialized. Please wait for agents to load or check your configuration.")
             return
         }
 

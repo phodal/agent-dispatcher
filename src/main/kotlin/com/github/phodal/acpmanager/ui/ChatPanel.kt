@@ -5,6 +5,7 @@ import com.github.phodal.acpmanager.acp.AgentSessionState
 import com.github.phodal.acpmanager.acp.MessageReference
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.github.phodal.acpmanager.ide.IdeAcpClient
+import com.github.phodal.acpmanager.services.CoroutineScopeHolder
 import com.github.phodal.acpmanager.ui.completion.CompletionManager
 import com.github.phodal.acpmanager.ui.mention.MentionItem
 import com.github.phodal.acpmanager.ui.renderer.AcpEventRenderer
@@ -13,6 +14,7 @@ import com.github.phodal.acpmanager.ui.renderer.DefaultRendererFactory
 import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
@@ -41,7 +43,8 @@ class ChatPanel(
     private val agentType: String = "default",
 ) : JPanel(BorderLayout()), Disposable {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scopeHolder = CoroutineScopeHolder.getInstance(project)
+    private val scope = scopeHolder.createScope("ChatPanel-${session.agentKey}")
 
     private val scrollPane: JBScrollPane
     private val inputArea: JBTextArea

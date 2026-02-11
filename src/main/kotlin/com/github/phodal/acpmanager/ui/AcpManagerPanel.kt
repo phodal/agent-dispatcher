@@ -3,11 +3,13 @@ package com.github.phodal.acpmanager.ui
 import com.github.phodal.acpmanager.acp.AcpSessionManager
 import com.github.phodal.acpmanager.config.AcpConfigService
 import com.github.phodal.acpmanager.ide.IdeAcpClient
+import com.github.phodal.acpmanager.services.CoroutineScopeHolder
 import com.github.phodal.acpmanager.skills.SkillDiscovery
 import com.github.phodal.acpmanager.ui.slash.BuiltinSlashCommands
 import com.github.phodal.acpmanager.ui.slash.SlashCommandRegistry
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -44,7 +46,8 @@ class AcpManagerPanel(
     private val project: Project,
 ) : SimpleToolWindowPanel(true, true), Disposable {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scopeHolder = CoroutineScopeHolder.getInstance(project)
+    private val scope = scopeHolder.createScope("AcpManagerPanel")
     private val sessionManager = AcpSessionManager.getInstance(project)
     private val configService = AcpConfigService.getInstance(project)
 
@@ -88,7 +91,7 @@ class AcpManagerPanel(
                 val agentKey = config.activeAgent ?: config.agents.keys.firstOrNull()
 
                 // Update UI on EDT
-                withContext(Dispatchers.Main) {
+                withContext(Dispatchers.EDT) {
                     selectedAgentKey = agentKey
                     welcomeToolbar?.refreshAllStatuses()
                 }
@@ -109,7 +112,7 @@ class AcpManagerPanel(
 
             // Initialize skill discovery (file I/O)
             try {
-                withContext(Dispatchers.Main) {
+                withContext(Dispatchers.EDT) {
                     initializeSkillDiscovery()
                 }
             } catch (e: Exception) {
@@ -317,10 +320,10 @@ class AcpManagerPanel(
     }
 
     private fun startSessionObserver() {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             sessionManager.sessionKeys.collectLatest { keys ->
                 log.info("AcpManagerPanel: sessionKeys changed: $keys")
-                ApplicationManager.getApplication().invokeLater {
+                withContext(Dispatchers.EDT) {
                     updateUI(keys)
                 }
             }
@@ -331,10 +334,10 @@ class AcpManagerPanel(
      * Start a periodic job to refresh agent connection statuses.
      */
     private fun startStatusRefresh() {
-        statusRefreshJob = scope.launch {
+        statusRefreshJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(3000) // Refresh every 3 seconds
-                ApplicationManager.getApplication().invokeLater {
+                withContext(Dispatchers.EDT) {
                     welcomeToolbar?.refreshAllStatuses()
                     chatPanels.values.forEach { panel ->
                         // Each chat panel's toolbar also gets refreshed

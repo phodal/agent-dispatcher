@@ -30,9 +30,23 @@ repositories {
     }
 }
 
+// IntelliJ bundles Kotlin runtime. For plugin packaging, exclude Kotlin runtime artifacts from
+// runtimeClasspath to avoid loading kotlin.* classes from PluginClassLoader (causes classloader
+// conflicts like "kotlin.ULong cannot be cast to kotlin.ULong" or Duration API NoSuchMethodError).
+configurations.all {
+    if (name == "runtimeClasspath") {
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib-common")
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib-jdk7")
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib-jdk8")
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-reflect")
+    }
+}
+
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/version_catalogs.html
 dependencies {
     // ACP SDK - exclude all transitive dependencies that conflict with IntelliJ Platform
+    // Also exclude Kotlin stdlib to use IntelliJ's bundled version
     implementation(libs.acp.sdk) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
@@ -40,12 +54,16 @@ dependencies {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json-jvm")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core-jvm")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core-jvm")
+        excludeKotlinDeps()
     }
     implementation(libs.acp.model) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json-jvm")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core-jvm")
+        excludeKotlinDeps()
     }
 
     // MCP SDK - exclude transitive dependencies that conflict with IntelliJ Platform
@@ -56,33 +74,51 @@ dependencies {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-json-jvm")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-serialization-core-jvm")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core-jvm")
+        excludeKotlinDeps()
     }
 
     // Ktor for WebSocket server
     implementation(libs.ktor.server.core) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core-jvm")
+        excludeKotlinDeps()
     }
     implementation(libs.ktor.server.websockets) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core-jvm")
+        excludeKotlinDeps()
     }
     implementation(libs.ktor.server.cio) {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-io-core-jvm")
+        excludeKotlinDeps()
     }
 
     // Kotlin libraries (use platform-provided coroutines to avoid conflicts)
     compileOnly(libs.kotlinx.coroutines.core)
     compileOnly(libs.kotlinx.coroutines.swing)
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.kotlinx.io.core)
+    compileOnly(libs.kotlinx.serialization.json)
+    // ACP stdio transport uses kotlinx-io (not bundled by IntelliJ).
+    implementation(libs.kotlinx.io.core) {
+        excludeKotlinDeps()
+    }
 
     // YAML config
     implementation(libs.snakeyaml)
 
-    // Routa multi-agent coordination core
-    implementation(project(":routa-core"))
+    // Routa multi-agent coordination core — use platform coroutines to avoid ServiceLoader conflict
+    implementation(project(":routa-core")) {
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    }
 
     testImplementation(libs.junit)
     testImplementation(libs.opentest4j)
@@ -194,6 +230,23 @@ tasks {
     publishPlugin {
         dependsOn(patchChangelog)
     }
+
+    // Exclude Kotlin runtime jars from plugin distribution to avoid classloader conflicts
+    named<org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask>("prepareSandbox") {
+        exclude("**/kotlin-stdlib*.jar")
+        exclude("**/kotlin-reflect*.jar")
+    }
+}
+
+// Helper function to exclude Kotlin runtime dependencies from a module dependency.
+// IntelliJ bundles Kotlin; bundling kotlin-stdlib in plugin causes classloader conflicts
+// (e.g., kotlin.ULong cannot be cast to kotlin.ULong, or Duration API NoSuchMethodError).
+fun <T : org.gradle.api.artifacts.ModuleDependency> T.excludeKotlinDeps() {
+    exclude(module = "kotlin-runtime")
+    exclude(module = "kotlin-reflect")
+    exclude(module = "kotlin-stdlib")
+    exclude(module = "kotlin-stdlib-common")
+    exclude(module = "kotlin-stdlib-jdk8")
 }
 
 intellijPlatformTesting {
