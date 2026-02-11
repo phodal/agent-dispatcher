@@ -86,6 +86,11 @@ class DispatcherPanel(
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
     }
 
+    private val mcpTransportLabel = JBLabel("").apply {
+        foreground = JBColor(0x8B949E, 0x8B949E) // Gray color for transport type
+        font = font.deriveFont(8f)
+    }
+
     private val mcpRefreshButton = JButton(AllIcons.Actions.Refresh).apply {
         isContentAreaFilled = false
         isBorderPainted = false
@@ -290,6 +295,8 @@ class DispatcherPanel(
             add(mcpStatusLabel)
             add(Box.createHorizontalStrut(4))
             add(mcpUrlLabel)
+            add(Box.createHorizontalStrut(6))
+            add(mcpTransportLabel)
             add(Box.createHorizontalStrut(4))
             add(mcpRefreshButton)
         }
@@ -471,6 +478,11 @@ class DispatcherPanel(
                         mcpStatusLabel.toolTipText = "Click refresh to check status"
                         mcpRefreshButton.isEnabled = true
 
+                        // Detect and display transport type
+                        val transportInfo = detectMcpTransportType(url)
+                        mcpTransportLabel.text = transportInfo
+                        mcpTransportLabel.toolTipText = getTransportTooltip(url)
+
                         // Auto-check status when URL becomes available
                         checkMcpServerStatus()
                     } else {
@@ -480,6 +492,8 @@ class DispatcherPanel(
                         mcpStatusLabel.foreground = JBColor.GRAY
                         mcpStatusLabel.toolTipText = "MCP Server not started"
                         mcpRefreshButton.isEnabled = false
+                        mcpTransportLabel.text = ""
+                        mcpTransportLabel.toolTipText = null
                     }
                 }
             }
@@ -632,6 +646,50 @@ class DispatcherPanel(
     }
 
     // ── MCP Server Status ───────────────────────────────────────────────
+
+    /**
+     * Detect MCP transport type from URL.
+     *
+     * Returns a short label indicating the available transports:
+     * - "WS + SSE" - WebSocket at /mcp + Legacy SSE at /sse (RoutaMcpWebSocketServer)
+     * - "HTTP + WS + SSE" - Streamable HTTP + WebSocket + Legacy SSE (RoutaMcpStreamableHttpServer)
+     */
+    private fun detectMcpTransportType(url: String): String {
+        return when {
+            // If URL ends with /mcp, it's the WebSocket endpoint
+            // The server also provides /sse for legacy SSE
+            url.endsWith("/mcp") -> "[WS + SSE]"
+
+            // If URL ends with /sse, it's the legacy SSE endpoint
+            // The server also provides /mcp for WebSocket
+            url.endsWith("/sse") -> "[SSE + WS]"
+
+            // Future: detect Streamable HTTP server
+            // This would require checking server capabilities or a different URL pattern
+            else -> "[Unknown]"
+        }
+    }
+
+    /**
+     * Get detailed tooltip for transport type.
+     */
+    private fun getTransportTooltip(url: String): String {
+        return when {
+            url.endsWith("/mcp") -> """
+                Available transports:
+                • WebSocket: ws://...${url.substringAfter("http://")}
+                • Legacy SSE: ${url.replace("/mcp", "/sse")}
+            """.trimIndent()
+
+            url.endsWith("/sse") -> """
+                Available transports:
+                • Legacy SSE: $url
+                • WebSocket: ws://...${url.replace("/sse", "/mcp").substringAfter("http://")}
+            """.trimIndent()
+
+            else -> "MCP Server endpoint"
+        }
+    }
 
     private fun openUrlInBrowser(url: String) {
         try {
