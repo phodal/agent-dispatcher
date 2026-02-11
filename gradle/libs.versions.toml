@@ -9,7 +9,7 @@ kotlinxCoroutines = "1.10.1"
 kotlinxSerialization = "1.8.0"
 kotlinxIo = "0.6.0"
 snakeyaml = "2.5"
-kaml = "0.67.0"
+kaml = "0.104.0"
 slf4j = "2.0.16"
 ktor = "3.1.0"
 
