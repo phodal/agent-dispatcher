@@ -319,7 +319,7 @@ class AgentSession(
         try {
             log.info("Starting prompt collection for '$agentKey'...")
             acpClient.prompt(text).collect { event ->
-                log.info("Received event for '$agentKey': ${event::class.simpleName}")
+                log.debug("Received event for '$agentKey': ${event::class.simpleName}")
                 when (event) {
                     is Event.SessionUpdateEvent -> {
                         processSessionUpdateWithEvents(

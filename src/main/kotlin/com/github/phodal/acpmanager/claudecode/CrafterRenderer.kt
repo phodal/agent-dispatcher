@@ -57,7 +57,7 @@ class CrafterRenderer(
     )
 
     override fun onEvent(event: RenderEvent) {
-        log.info("CrafterRenderer[$agentKey]: onEvent ${event::class.simpleName}")
+        log.debug("CrafterRenderer[$agentKey]: onEvent ${event::class.simpleName}")
 
         // Find and execute the appropriate handler
         val handler = handlers.firstOrNull { it.canHandle(event) }

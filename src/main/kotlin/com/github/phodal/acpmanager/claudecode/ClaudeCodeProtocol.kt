@@ -138,7 +138,7 @@ fun parseClaudeOutputLine(line: String): ClaudeOutputMessage? {
     if (trimmed.isEmpty() || !trimmed.startsWith("{")) return null
 
     // Log raw JSON for debugging
-    protocolLog.info("[ClaudeCode JSON] $trimmed")
+    protocolLog.debug("[ClaudeCode JSON] $trimmed")
 
     return try {
         val jsonObj = json.parseToJsonElement(trimmed).jsonObject

@@ -3,6 +3,7 @@ package com.github.phodal.acpmanager.dispatcher.ui
 import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.openapi.diagnostic.logger
 import com.phodal.routa.core.provider.StreamChunk
+import kotlinx.serialization.json.*
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -10,16 +11,19 @@ import java.util.*
 private val log = logger<EventLogger>()
 
 /**
- * Logs all RenderEvent and StreamChunk events to a debug file for troubleshooting.
+ * Logs all RenderEvent and StreamChunk events to a JSONL debug file for troubleshooting.
  *
- * When enabled, creates timestamped log files in ~/.acp-manager/logs/
+ * When enabled, creates timestamped log files in ~/.routa/logs/
  * to help diagnose missing messages or rendering issues.
+ *
+ * Format: One JSON object per line (JSONL).
  */
 object EventLogger {
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS")
     private var logFile: File? = null
     private var isEnabled = false
+    private val json = Json { prettyPrint = false }
 
     /**
      * Enable logging to file. Creates a new log file with timestamp.
@@ -28,17 +32,22 @@ object EventLogger {
         if (isEnabled) return
 
         try {
-            val logDir = File(System.getProperty("user.home"), ".acp-manager/logs").apply {
+            val logDir = File(System.getProperty("user.home"), ".routa/logs").apply {
                 mkdirs()
             }
 
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
-            logFile = File(logDir, "dispatcher_events_$timestamp.log")
+            logFile = File(logDir, "dispatcher_events_$timestamp.jsonl")
 
-            logFile?.writeText("=== Dispatcher Event Log Started at ${dateFormat.format(Date())} ===\n\n")
+            // Write header
+            val header = buildJsonObject {
+                put("type", "session_start")
+                put("timestamp", dateFormat.format(Date()))
+            }
+            logFile?.writeText("$header\n")
+
             isEnabled = true
-
-            log.info("EventLogger enabled: ${logFile?.absolutePath}")
+            log.debug("EventLogger enabled: ${logFile?.absolutePath}")
         } catch (e: Exception) {
             log.warn("Failed to enable EventLogger: ${e.message}", e)
         }
@@ -51,126 +60,180 @@ object EventLogger {
         if (!isEnabled) return
 
         try {
-            logFile?.appendText("\n=== Dispatcher Event Log Ended at ${dateFormat.format(Date())} ===\n")
+            val footer = buildJsonObject {
+                put("type", "session_end")
+                put("timestamp", dateFormat.format(Date()))
+            }
+            logFile?.appendText("$footer\n")
             isEnabled = false
             logFile = null
-            log.info("EventLogger disabled")
+            log.debug("EventLogger disabled")
         } catch (e: Exception) {
             log.warn("Failed to disable EventLogger: ${e.message}", e)
         }
     }
 
     /**
-     * Log a RenderEvent.
+     * Log a RenderEvent as JSONL.
      */
     fun logRenderEvent(agentId: String, event: RenderEvent) {
         if (!isEnabled) return
 
         try {
-            val timestamp = dateFormat.format(Date())
-            val eventInfo = buildString {
-                append("[$timestamp] [RENDER] [$agentId] ${event::class.simpleName}")
+            val jsonObj = buildJsonObject {
+                put("type", "render_event")
+                put("timestamp", dateFormat.format(Date()))
+                put("agent_id", agentId)
+                put("event_class", event::class.simpleName)
 
                 when (event) {
-                    is RenderEvent.MessageStart -> append(" ()")
+                    is RenderEvent.MessageStart -> {
+                        put("event_type", "message_start")
+                    }
                     is RenderEvent.MessageChunk -> {
-                        val preview = event.content.take(60).replace("\n", "\\n")
-                        val suffix = if (event.content.length > 60) "..." else ""
-                        append(" (${event.content.length} chars): \"$preview$suffix\"")
+                        put("event_type", "message_chunk")
+                        put("content_length", event.content.length)
+                        put("content_preview", event.content.take(100).replace("\n", "\\n"))
                     }
                     is RenderEvent.MessageEnd -> {
-                        val preview = event.fullContent.take(60).replace("\n", "\\n")
-                        val suffix = if (event.fullContent.length > 60) "..." else ""
-                        append(" (total ${event.fullContent.length} chars): \"$preview$suffix\"")
+                        put("event_type", "message_end")
+                        put("total_length", event.fullContent.length)
+                        put("content_preview", event.fullContent.take(100).replace("\n", "\\n"))
                     }
-                    is RenderEvent.ThinkingStart -> append(" ()")
+                    is RenderEvent.ThinkingStart -> {
+                        put("event_type", "thinking_start")
+                    }
                     is RenderEvent.ThinkingChunk -> {
-                        val preview = event.content.take(60).replace("\n", "\\n")
-                        val suffix = if (event.content.length > 60) "..." else ""
-                        append(" (${event.content.length} chars): \"$preview$suffix\"")
+                        put("event_type", "thinking_chunk")
+                        put("content_length", event.content.length)
+                        put("content_preview", event.content.take(100).replace("\n", "\\n"))
                     }
                     is RenderEvent.ThinkingEnd -> {
-                        val preview = event.fullContent.take(60).replace("\n", "\\n")
-                        val suffix = if (event.fullContent.length > 60) "..." else ""
-                        append(" (total ${event.fullContent.length} chars): \"$preview$suffix\"")
+                        put("event_type", "thinking_end")
+                        put("total_length", event.fullContent.length)
+                        put("content_preview", event.fullContent.take(100).replace("\n", "\\n"))
                     }
-                    is RenderEvent.ToolCallStart -> append(" (tool=${event.toolName}, id=${event.toolCallId})")
-                    is RenderEvent.ToolCallUpdate -> append(" (id=${event.toolCallId}, status=${event.status})")
+                    is RenderEvent.ToolCallStart -> {
+                        put("event_type", "tool_call_start")
+                        put("tool_name", event.toolName)
+                        put("tool_call_id", event.toolCallId)
+                        event.title?.let { put("title", it) }
+                    }
+                    is RenderEvent.ToolCallUpdate -> {
+                        put("event_type", "tool_call_update")
+                        put("tool_call_id", event.toolCallId)
+                        put("status", event.status.toString())
+                    }
                     is RenderEvent.ToolCallParameterUpdate -> {
-                        val preview = event.partialParameters.take(100).replace("\n", " ")
-                        val suffix = if (event.partialParameters.length > 100) "..." else ""
-                        append(" (id=${event.toolCallId}, params: \"$preview$suffix\")")
+                        put("event_type", "tool_call_params")
+                        put("tool_call_id", event.toolCallId)
+                        put("params_preview", event.partialParameters.take(200))
                     }
                     is RenderEvent.ToolCallEnd -> {
-                        val outputPreview = event.output?.take(100)?.replace("\n", " ") ?: ""
-                        val suffix = if ((event.output?.length ?: 0) > 100) "..." else ""
-                        append(" (id=${event.toolCallId}, status=${event.status}, output: \"$outputPreview$suffix\")")
+                        put("event_type", "tool_call_end")
+                        put("tool_call_id", event.toolCallId)
+                        put("status", event.status.toString())
+                        event.output?.let { put("output_preview", it.take(200)) }
                     }
-                    is RenderEvent.Info -> append(" (${event.message})")
-                    is RenderEvent.Error -> append(" (${event.message})")
-                    is RenderEvent.PromptComplete -> append(" (${event.stopReason})")
-                    else -> append(" (${event.timestamp})")
+                    is RenderEvent.Info -> {
+                        put("event_type", "info")
+                        put("message", event.message)
+                    }
+                    is RenderEvent.Error -> {
+                        put("event_type", "error")
+                        put("message", event.message)
+                    }
+                    is RenderEvent.PromptComplete -> {
+                        put("event_type", "prompt_complete")
+                        put("stop_reason", event.stopReason)
+                    }
+                    else -> {
+                        put("event_type", "other")
+                    }
                 }
             }
 
-            logFile?.appendText("$eventInfo\n")
+            logFile?.appendText("$jsonObj\n")
         } catch (e: Exception) {
             // Silently fail to avoid disrupting the UI
-            log.debug("Failed to log RenderEvent: ${e.message}")
         }
     }
 
     /**
-     * Log a StreamChunk.
+     * Log a StreamChunk as JSONL.
      */
     fun logStreamChunk(agentId: String, chunk: StreamChunk) {
         if (!isEnabled) return
 
         try {
-            val timestamp = dateFormat.format(Date())
-            val chunkInfo = buildString {
-                append("[$timestamp] [STREAM] [$agentId] ${chunk::class.simpleName}")
+            val jsonObj = buildJsonObject {
+                put("type", "stream_chunk")
+                put("timestamp", dateFormat.format(Date()))
+                put("agent_id", agentId)
+                put("chunk_class", chunk::class.simpleName)
 
                 when (chunk) {
                     is StreamChunk.Text -> {
-                        val preview = chunk.content.take(60).replace("\n", "\\n")
-                        val suffix = if (chunk.content.length > 60) "..." else ""
-                        append(" (${chunk.content.length} chars): \"$preview$suffix\"")
+                        put("chunk_type", "text")
+                        put("content_length", chunk.content.length)
+                        put("content_preview", chunk.content.take(100).replace("\n", "\\n"))
                     }
                     is StreamChunk.Thinking -> {
-                        val preview = chunk.content.take(60).replace("\n", "\\n")
-                        val suffix = if (chunk.content.length > 60) "..." else ""
-                        append(" (phase=${chunk.phase}, ${chunk.content.length} chars): \"$preview$suffix\"")
+                        put("chunk_type", "thinking")
+                        put("phase", chunk.phase.toString())
+                        put("content_length", chunk.content.length)
+                        put("content_preview", chunk.content.take(100).replace("\n", "\\n"))
                     }
                     is StreamChunk.ToolCall -> {
-                        val argsPreview = chunk.arguments?.take(100)?.replace("\n", " ") ?: ""
-                        val argsSuffix = if ((chunk.arguments?.length ?: 0) > 100) "..." else ""
-                        append(" (name=${chunk.name}, status=${chunk.status}, args: \"$argsPreview$argsSuffix\")")
+                        put("chunk_type", "tool_call")
+                        put("name", chunk.name)
+                        put("status", chunk.status.toString())
+                        chunk.arguments?.let { put("args_preview", it.take(200)) }
+                        chunk.result?.let { put("result_preview", it.take(200)) }
                     }
-                    is StreamChunk.Error -> append(" (${chunk.message})")
-                    is StreamChunk.Completed -> append(" (${chunk.stopReason})")
-                    is StreamChunk.CompletionReport -> append(" (success=${chunk.success}, summary=${chunk.summary})")
-                    else -> {}
+                    is StreamChunk.Error -> {
+                        put("chunk_type", "error")
+                        put("message", chunk.message)
+                    }
+                    is StreamChunk.Completed -> {
+                        put("chunk_type", "completed")
+                        put("stop_reason", chunk.stopReason)
+                    }
+                    is StreamChunk.CompletionReport -> {
+                        put("chunk_type", "completion_report")
+                        put("success", chunk.success)
+                        put("summary", chunk.summary)
+                        if (chunk.filesModified.isNotEmpty()) {
+                            put("files_modified", JsonArray(chunk.filesModified.map { JsonPrimitive(it) }))
+                        }
+                    }
+                    else -> {
+                        put("chunk_type", "other")
+                    }
                 }
             }
 
-            logFile?.appendText("$chunkInfo\n")
+            logFile?.appendText("$jsonObj\n")
         } catch (e: Exception) {
-            log.debug("Failed to log StreamChunk: ${e.message}")
+            // Silently fail
         }
     }
 
     /**
-     * Log a plain text message.
+     * Log a plain message as JSONL.
      */
     fun log(message: String) {
         if (!isEnabled) return
 
         try {
-            val timestamp = dateFormat.format(Date())
-            logFile?.appendText("[$timestamp] [INFO] $message\n")
+            val jsonObj = buildJsonObject {
+                put("type", "info")
+                put("timestamp", dateFormat.format(Date()))
+                put("message", message)
+            }
+            logFile?.appendText("$jsonObj\n")
         } catch (e: Exception) {
-            log.debug("Failed to log message: ${e.message}")
+            // Silently fail
         }
     }
 }

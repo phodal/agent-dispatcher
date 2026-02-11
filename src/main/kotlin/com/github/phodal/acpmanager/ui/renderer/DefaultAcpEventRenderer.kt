@@ -45,7 +45,7 @@ class DefaultAcpEventRenderer(
     private val toolCallPanels = mutableMapOf<String, ToolCallPanel>()
 
     override fun onEvent(event: RenderEvent) {
-        log.info("DefaultRenderer[$agentKey]: onEvent ${event::class.simpleName}")
+        log.debug("DefaultRenderer[$agentKey]: onEvent ${event::class.simpleName}")
         when (event) {
             is RenderEvent.UserMessage -> addUserMessage(event)
             is RenderEvent.ThinkingStart -> startThinking()

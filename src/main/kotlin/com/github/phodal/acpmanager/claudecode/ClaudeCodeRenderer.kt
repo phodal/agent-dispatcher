@@ -62,7 +62,7 @@ class ClaudeCodeRenderer(
     )
 
     override fun onEvent(event: RenderEvent) {
-        log.info("ClaudeCodeRenderer[$agentKey]: onEvent ${event::class.simpleName}")
+        log.debug("ClaudeCodeRenderer[$agentKey]: onEvent ${event::class.simpleName}")
 
         // Find and execute the appropriate handler
         val handler = handlers.firstOrNull { it.canHandle(event) }
