@@ -567,16 +567,6 @@ class DispatcherPanel(
             return
         }
 
-        // Re-initialize with current model selections
-        val crafterModel = routaService.crafterModelKey.value
-        if (crafterModel.isNotBlank()) {
-            routaService.initialize(
-                crafterAgent = crafterModel,
-                routaAgent = routaService.routaModelKey.value.ifBlank { crafterModel },
-                gateAgent = routaService.gateModelKey.value.ifBlank { crafterModel },
-            )
-        }
-
         // Clear all panels
         routaSection.clear()
         crafterSection.clear()
