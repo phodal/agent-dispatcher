@@ -40,7 +40,7 @@ private val log = logger<AcpManagerPanel>()
  * Features:
  * - Agent selector with colored status indicators (green/yellow/red/gray)
  * - Automatic connection when sending first message
- * - Status refresh timer for connection indicators
+ * - Manual refresh button for connection status
  */
 class AcpManagerPanel(
     private val project: Project,
@@ -60,9 +60,6 @@ class AcpManagerPanel(
     private var selectedAgentKey: String? = null
     private var welcomeToolbar: ChatInputToolbar? = null
 
-    // Status refresh timer
-    private var statusRefreshJob: Job? = null
-
     // Skill discovery for Claude Skills
     private var skillDiscovery: SkillDiscovery? = null
 
@@ -76,9 +73,6 @@ class AcpManagerPanel(
 
         // Watch session changes
         startSessionObserver()
-
-        // Start periodic status refresh
-        startStatusRefresh()
 
         // Load config and discover skills in background to avoid blocking EDT
         scope.launch(Dispatchers.IO) {
@@ -330,23 +324,6 @@ class AcpManagerPanel(
         }
     }
 
-    /**
-     * Start a periodic job to refresh agent connection statuses.
-     */
-    private fun startStatusRefresh() {
-        statusRefreshJob = scope.launch(Dispatchers.IO) {
-            while (isActive) {
-                delay(3000) // Refresh every 3 seconds
-                withContext(Dispatchers.EDT) {
-                    welcomeToolbar?.refreshAllStatuses()
-                    chatPanels.values.forEach { panel ->
-                        // Each chat panel's toolbar also gets refreshed
-                    }
-                }
-            }
-        }
-    }
-
     private fun updateUI(sessionKeys: List<String>) {
         log.info("AcpManagerPanel: updateUI called with sessionKeys=$sessionKeys, existing chatPanels=${chatPanels.keys}")
 
@@ -437,7 +414,6 @@ class AcpManagerPanel(
     }
 
     override fun dispose() {
-        statusRefreshJob?.cancel()
         skillDiscovery?.dispose()
         scope.cancel()
         chatPanels.values.forEach { it.dispose() }

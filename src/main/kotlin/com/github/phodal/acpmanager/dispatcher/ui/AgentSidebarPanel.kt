@@ -129,11 +129,14 @@ class AgentSidebarPanel : JPanel(BorderLayout()) {
         val routaSection = JPanel(BorderLayout()).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, 70)
-
+            // Fixed compact size for single card
+            val headerHeight = 24
+            val cardHeight = 44
+            maximumSize = Dimension(Int.MAX_VALUE, headerHeight + cardHeight)
+            preferredSize = Dimension(preferredSize.width, headerHeight + cardHeight)
+            
             add(createSectionHeader("ROUTA", ROUTA_ACCENT, null), BorderLayout.NORTH)
             routaCard.alignmentX = Component.LEFT_ALIGNMENT
-            routaCard.maximumSize = Dimension(Int.MAX_VALUE, 44)
             add(routaCard, BorderLayout.CENTER)
         }
         mainPanel.add(routaSection)
@@ -145,6 +148,7 @@ class AgentSidebarPanel : JPanel(BorderLayout()) {
         val crafterSection = JPanel(BorderLayout()).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
+            // No size limit - grows with content
 
             add(createSectionHeader("CRAFTERs", CRAFTER_ACCENT, crafterCountLabel), BorderLayout.NORTH)
 
@@ -164,15 +168,19 @@ class AgentSidebarPanel : JPanel(BorderLayout()) {
         val gateSection = JPanel(BorderLayout()).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, 70)
+            // Fixed compact size for single card
+            val headerHeight = 24
+            val cardHeight = 44
+            maximumSize = Dimension(Int.MAX_VALUE, headerHeight + cardHeight)
+            preferredSize = Dimension(preferredSize.width, headerHeight + cardHeight)
 
             add(createSectionHeader("GATE", GATE_ACCENT, null), BorderLayout.NORTH)
             gateCard.alignmentX = Component.LEFT_ALIGNMENT
-            gateCard.maximumSize = Dimension(Int.MAX_VALUE, 44)
             add(gateCard, BorderLayout.CENTER)
         }
         mainPanel.add(gateSection)
 
+        // Push GATE to bottom when there's extra space
         mainPanel.add(Box.createVerticalGlue())
 
         val scrollPane = JScrollPane(mainPanel).apply {
@@ -249,7 +257,8 @@ class AgentSidebarPanel : JPanel(BorderLayout()) {
             // Hide placeholder, show card
             crafterPlaceholder.isVisible = false
             card.alignmentX = Component.LEFT_ALIGNMENT
-            card.maximumSize = Dimension(Int.MAX_VALUE, 48)
+            // Let card size naturally based on content
+            card.maximumSize = Dimension(Int.MAX_VALUE, card.preferredSize.height)
             crafterListPanel.add(card)
 
             crafterCountLabel.text = "${crafterOrder.size}"

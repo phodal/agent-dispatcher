@@ -22,7 +22,7 @@ import javax.swing.JPanel
  *
  * Layout:
  * - Left: Agent selector (with status dots) + @ button + / button + status label
- * - Right: Send/Stop button
+ * - Right: Refresh status button + New session button + Send/Stop button
  */
 class ChatInputToolbar(
     private val project: Project,
@@ -34,6 +34,7 @@ class ChatInputToolbar(
     private val sendButton = JButton("Send", AllIcons.Actions.Execute)
     private val stopButton = JButton("Stop", AllIcons.Actions.Suspend)
     private val newSessionButton = JButton(AllIcons.Actions.Restart)
+    private val refreshStatusButton = JButton(AllIcons.Actions.Refresh)
     private val statusLabel = JBLabel()
 
     // Completion trigger buttons
@@ -104,9 +105,22 @@ class ChatInputToolbar(
         }
         add(leftPanel, BorderLayout.WEST)
 
-        // Right side: New Session + Send/Stop buttons
+        // Right side: Refresh Status + New Session + Send/Stop buttons
         val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
+
+            // Refresh Status button
+            refreshStatusButton.apply {
+                toolTipText = "Refresh agent connection status"
+                preferredSize = Dimension(28, 28)
+                isContentAreaFilled = false
+                isBorderPainted = false
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addActionListener { 
+                    agentSelector.refreshAllStatuses()
+                }
+            }
+            add(refreshStatusButton)
 
             // New Session button
             newSessionButton.apply {
