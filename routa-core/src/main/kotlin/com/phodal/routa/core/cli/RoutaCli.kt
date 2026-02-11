@@ -6,6 +6,7 @@ import com.phodal.routa.core.coordinator.TaskSummary
 import com.phodal.routa.core.provider.AgentProvider
 import com.phodal.routa.core.provider.CapabilityBasedRouter
 import com.phodal.routa.core.provider.StreamChunk
+import com.phodal.routa.core.provider.ThinkingPhase
 import com.phodal.routa.core.runner.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -203,9 +204,24 @@ private fun printProviderInfo(provider: AgentProvider) {
 private fun printStreamChunk(agentId: String, chunk: StreamChunk) {
     when (chunk) {
         is StreamChunk.Text -> print(chunk.content)
+        is StreamChunk.Thinking -> {
+            // Print thinking content with subtle styling
+            when (chunk.phase) {
+                ThinkingPhase.START -> print("\n    💭 ")
+                ThinkingPhase.CHUNK -> print(chunk.content)
+                ThinkingPhase.END -> println()
+            }
+        }
         is StreamChunk.ToolCall -> println("    [Tool: ${chunk.name} (${chunk.status})]")
         is StreamChunk.Error -> println("    ⚠ ${chunk.message}")
         is StreamChunk.Completed -> println("\n    [${chunk.stopReason}]")
+        is StreamChunk.CompletionReport -> {
+            val icon = if (chunk.success) "✓" else "✗"
+            println("\n    $icon Report: ${chunk.summary.take(100)}")
+            if (chunk.filesModified.isNotEmpty()) {
+                println("      Files: ${chunk.filesModified.joinToString(", ")}")
+            }
+        }
         is StreamChunk.Heartbeat -> { /* silent */ }
     }
 }

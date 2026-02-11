@@ -190,11 +190,24 @@ fun AgentRole.requirements(): ProviderRequirements = when (this) {
  * Incremental output from a streaming agent execution.
  *
  * Inspired by Intent's `ACPProviderStreaming` chunk types:
- * - Text content, tool calls, heartbeats, errors, completion signals.
+ * - Text content, thinking, tool calls, heartbeats, errors, completion signals.
  */
 sealed class StreamChunk {
     /** A piece of text output from the agent. */
     data class Text(val content: String) : StreamChunk()
+
+    /**
+     * Agent thinking/reasoning content (extended thinking).
+     *
+     * Thinking content should be rendered differently from regular text:
+     * - Collapsible panel that expands during streaming
+     * - Collapses automatically when thinking ends
+     * - Subtle styling to distinguish from main output
+     */
+    data class Thinking(
+        val content: String,
+        val phase: ThinkingPhase = ThinkingPhase.CHUNK,
+    ) : StreamChunk()
 
     /** Agent is invoking a tool. */
     data class ToolCall(
@@ -215,6 +228,30 @@ sealed class StreamChunk {
         val stopReason: String,
         val totalTokens: Int? = null,
     ) : StreamChunk()
+
+    /**
+     * Completion report from an agent.
+     * Used to display the final summary when an agent finishes its task.
+     */
+    data class CompletionReport(
+        val agentId: String,
+        val taskId: String,
+        val summary: String,
+        val filesModified: List<String> = emptyList(),
+        val success: Boolean = true,
+    ) : StreamChunk()
+}
+
+/**
+ * Phase of thinking content for proper UI rendering.
+ */
+enum class ThinkingPhase {
+    /** Thinking has started - create the thinking panel. */
+    START,
+    /** A chunk of thinking content - append to the panel. */
+    CHUNK,
+    /** Thinking has ended - finalize and collapse the panel. */
+    END,
 }
 
 enum class ToolCallStatus {

@@ -52,11 +52,18 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
         font = Font("Monospaced", Font.PLAIN, 10)
     }
 
-    // LLM model selector for KoogAgent
+    private val mcpUrlLabel = JBLabel("").apply {
+        foreground = JBColor(0x58A6FF, 0x58A6FF)  // blue link-style
+        font = font.deriveFont(9f)
+        toolTipText = "MCP Server SSE endpoint for Claude Code coordination tools"
+        isVisible = false
+    }
+
+    // LLM model selector for KoogAgent / ACP agent selector
     private val modelCombo = JComboBox<String>().apply {
         preferredSize = Dimension(180, 24)
         font = font.deriveFont(11f)
-        toolTipText = "LLM Model for ROUTA planning (KoogAgent)"
+        toolTipText = "Agent for ROUTA planning"
     }
 
     /** Callback when the LLM model is changed. */
@@ -113,6 +120,7 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
                 add(toggleLabel)
                 add(JBLabel("│").apply { foreground = JBColor(0x30363D, 0x30363D) })
                 add(previewLabel)
+                add(mcpUrlLabel)
             }
             add(leftPanel, BorderLayout.WEST)
 
@@ -187,6 +195,21 @@ class RoutaSectionPanel : JPanel(BorderLayout()) {
      */
     fun setSelectedModel(model: String) {
         modelCombo.selectedItem = model
+    }
+
+    /**
+     * Set the MCP server URL to display.
+     */
+    fun setMcpServerUrl(url: String?) {
+        SwingUtilities.invokeLater {
+            if (url != null) {
+                mcpUrlLabel.text = "│ MCP: $url"
+                mcpUrlLabel.isVisible = true
+            } else {
+                mcpUrlLabel.text = ""
+                mcpUrlLabel.isVisible = false
+            }
+        }
     }
 
     /**

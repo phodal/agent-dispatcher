@@ -1,6 +1,9 @@
 package com.github.phodal.acpmanager.dispatcher.ui
 
+import com.github.phodal.acpmanager.claudecode.ClaudeCodeRenderer
 import com.github.phodal.acpmanager.dispatcher.routa.CrafterStreamState
+import com.github.phodal.acpmanager.ui.renderer.AcpEventRenderer
+import com.github.phodal.acpmanager.ui.renderer.RenderEvent
 import com.intellij.icons.AllIcons
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
@@ -8,6 +11,7 @@ import com.intellij.ui.components.JBTabbedPane
 import com.intellij.util.ui.JBUI
 import com.phodal.routa.core.model.AgentStatus
 import com.phodal.routa.core.provider.StreamChunk
+import com.phodal.routa.core.provider.ThinkingPhase
 import com.phodal.routa.core.provider.ToolCallStatus
 import java.awt.*
 import javax.swing.*
@@ -270,10 +274,13 @@ class CrafterSectionPanel : JPanel(BorderLayout()) {
 /**
  * Individual CRAFTER detail panel — shown inside a tab.
  *
+ * Uses [ClaudeCodeRenderer] to properly render streaming events (thinking, tool calls, messages)
+ * with the same high-quality rendering used in the main chat panel.
+ *
  * Shows:
- * - Task info: title, objective, scope, acceptance criteria
- * - Status bar with progress
- * - Streaming output area (main content)
+ * - Task info header: title, agent ID, status, progress bar
+ * - Task details (collapsible)
+ * - Rendered streaming output via [AcpEventRenderer]
  */
 class CrafterDetailPanel : JPanel(BorderLayout()) {
 
@@ -300,21 +307,6 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
         foreground = CrafterSectionPanel.CRAFTER_ACCENT
     }
 
-    // Streaming output — the main content area
-    private val outputArea = JTextArea().apply {
-        isEditable = false
-        lineWrap = true
-        wrapStyleWord = true
-        background = JBColor(0x0D1117, 0x0D1117)
-        foreground = JBColor(0xC0C0C0, 0xA0A0A0)
-        font = Font("Monospaced", Font.PLAIN, 11)
-        border = JBUI.Borders.empty(4)
-    }
-
-    private val outputScroll = JScrollPane(outputArea).apply {
-        border = BorderFactory.createLineBorder(JBColor(0x21262D, 0x21262D))
-    }
-
     // Task details (collapsible)
     private val taskDetailsArea = JTextArea(3, 40).apply {
         isEditable = false
@@ -338,16 +330,35 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
     }
 
-    // Tool call tracking
-    private val toolCallPanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        isOpaque = false
-        border = JBUI.Borders.empty(2, 0)
-    }
-
     private var detailsExpanded = false
 
+    // ── Renderer-based output (replaces manual thinking/toolCall/output panels) ──
+
+    private val rendererScroll: JScrollPane
+
+    private val renderer: AcpEventRenderer = ClaudeCodeRenderer(
+        agentKey = "crafter",
+        scrollCallback = {
+            SwingUtilities.invokeLater {
+                val vertical = rendererScroll.verticalScrollBar
+                vertical.value = vertical.maximum
+            }
+        }
+    )
+
+    // State tracking for StreamChunk → RenderEvent conversion
+    private var messageStarted = false
+    private val messageBuffer = StringBuilder()
+    private var toolCallCounter = 0
+    private var currentToolCallId: String? = null
+
     init {
+        rendererScroll = JScrollPane(renderer.container).apply {
+            border = BorderFactory.createLineBorder(JBColor(0x21262D, 0x21262D))
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
+
         isOpaque = true
         background = JBColor(0x0D1117, 0x0D1117)
         border = JBUI.Borders.empty(4)
@@ -386,7 +397,7 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
             }
         })
 
-        // Top section: info + progress + details
+        // Top section: info + progress + details only (no thinking/toolCall/completion — renderer handles those)
         val topSection = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
@@ -394,15 +405,14 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
             add(progressBar)
             add(Box.createVerticalStrut(4))
             add(detailsSection)
-            add(toolCallPanel)
         }
 
-        // Split: top info + bottom streaming output
+        // Split: top info + bottom renderer output
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT).apply {
             topComponent = topSection
-            bottomComponent = outputScroll
+            bottomComponent = rendererScroll
             dividerLocation = 80
-            resizeWeight = 0.2
+            resizeWeight = 0.15
             border = JBUI.Borders.empty()
         }
 
@@ -433,42 +443,133 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
             else -> 0
         }
         progressBar.foreground = statusColor
-
-        // Don't replace output text on update (streaming handles that)
-        if (outputArea.text.isEmpty() && state.outputText.isNotEmpty()) {
-            outputArea.text = state.outputText
-            outputArea.caretPosition = outputArea.document.length
-        }
     }
 
     /**
      * Append a streaming chunk to the output.
+     *
+     * Converts [StreamChunk] (from routa-core) to [RenderEvent] and dispatches
+     * to the embedded [ClaudeCodeRenderer] for proper rendering of thinking,
+     * tool calls, messages, etc.
      */
     fun appendChunk(chunk: StreamChunk) {
         when (chunk) {
             is StreamChunk.Text -> {
-                outputArea.append(chunk.content)
-                trimOutput()
-                outputArea.caretPosition = outputArea.document.length
+                if (!messageStarted) {
+                    renderer.onEvent(RenderEvent.MessageStart())
+                    messageStarted = true
+                }
+                messageBuffer.append(chunk.content)
+                renderer.onEvent(RenderEvent.MessageChunk(chunk.content))
+            }
+
+            is StreamChunk.Thinking -> {
+                finalizeMessage()
+                when (chunk.phase) {
+                    ThinkingPhase.START -> renderer.onEvent(RenderEvent.ThinkingStart())
+                    ThinkingPhase.CHUNK -> renderer.onEvent(RenderEvent.ThinkingChunk(chunk.content))
+                    ThinkingPhase.END -> renderer.onEvent(RenderEvent.ThinkingEnd(chunk.content))
+                }
             }
 
             is StreamChunk.ToolCall -> {
-                addToolCallEntry(chunk)
+                finalizeMessage()
+                handleToolCallChunk(chunk)
             }
 
             is StreamChunk.Error -> {
-                outputArea.append("\n[ERROR] ${chunk.message}\n")
-                outputArea.caretPosition = outputArea.document.length
+                finalizeMessage()
+                renderer.onEvent(RenderEvent.Error(chunk.message))
             }
 
             is StreamChunk.Completed -> {
+                finalizeMessage()
                 statusLabel.text = "COMPLETED"
                 statusLabel.foreground = CrafterSectionPanel.CRAFTER_ACCENT
                 progressBar.value = 100
                 progressBar.foreground = CrafterSectionPanel.CRAFTER_ACCENT
+                renderer.onEvent(RenderEvent.PromptComplete(chunk.stopReason))
+            }
+
+            is StreamChunk.CompletionReport -> {
+                finalizeMessage()
+                val icon = if (chunk.success) "✓" else "✗"
+                val filesInfo = if (chunk.filesModified.isNotEmpty()) {
+                    " | Files: ${chunk.filesModified.joinToString(", ")}"
+                } else ""
+                renderer.onEvent(RenderEvent.Info("$icon ${chunk.summary}$filesInfo"))
             }
 
             else -> {}
+        }
+    }
+
+    /**
+     * Convert a routa [StreamChunk.ToolCall] to appropriate [RenderEvent] tool call events.
+     */
+    private fun handleToolCallChunk(chunk: StreamChunk.ToolCall) {
+        when (chunk.status) {
+            ToolCallStatus.STARTED -> {
+                val id = "tc-${toolCallCounter++}"
+                currentToolCallId = id
+                renderer.onEvent(
+                    RenderEvent.ToolCallStart(
+                        toolCallId = id,
+                        toolName = chunk.name,
+                        title = chunk.name,
+                        kind = null,
+                    )
+                )
+            }
+
+            ToolCallStatus.IN_PROGRESS -> {
+                val id = currentToolCallId ?: "tc-${toolCallCounter++}"
+                renderer.onEvent(
+                    RenderEvent.ToolCallUpdate(
+                        toolCallId = id,
+                        status = com.agentclientprotocol.model.ToolCallStatus.IN_PROGRESS,
+                        title = chunk.name,
+                    )
+                )
+            }
+
+            ToolCallStatus.COMPLETED -> {
+                val id = currentToolCallId ?: "tc-${toolCallCounter++}"
+                renderer.onEvent(
+                    RenderEvent.ToolCallEnd(
+                        toolCallId = id,
+                        status = com.agentclientprotocol.model.ToolCallStatus.COMPLETED,
+                        title = chunk.name,
+                        output = chunk.result,
+                    )
+                )
+                currentToolCallId = null
+            }
+
+            ToolCallStatus.FAILED -> {
+                val id = currentToolCallId ?: "tc-${toolCallCounter++}"
+                renderer.onEvent(
+                    RenderEvent.ToolCallEnd(
+                        toolCallId = id,
+                        status = com.agentclientprotocol.model.ToolCallStatus.FAILED,
+                        title = chunk.name,
+                        output = chunk.result,
+                    )
+                )
+                currentToolCallId = null
+            }
+        }
+    }
+
+    /**
+     * Finalize any in-progress message streaming.
+     * Called before switching to thinking, tool call, or completion events.
+     */
+    private fun finalizeMessage() {
+        if (messageStarted) {
+            renderer.onEvent(RenderEvent.MessageEnd(messageBuffer.toString()))
+            messageStarted = false
+            messageBuffer.clear()
         }
     }
 
@@ -478,36 +579,5 @@ class CrafterDetailPanel : JPanel(BorderLayout()) {
     fun setTaskDetails(details: String) {
         taskDetailsArea.text = details
         taskDetailsArea.caretPosition = 0
-    }
-
-    private fun addToolCallEntry(toolCall: StreamChunk.ToolCall) {
-        val icon = when (toolCall.status) {
-            ToolCallStatus.STARTED -> AllIcons.Process.Step_1
-            ToolCallStatus.IN_PROGRESS -> AllIcons.Process.Step_4
-            ToolCallStatus.COMPLETED -> AllIcons.RunConfigurations.TestPassed
-            ToolCallStatus.FAILED -> AllIcons.RunConfigurations.TestFailed
-        }
-        val label = JBLabel("${toolCall.name}${if (toolCall.result != null) " → ${toolCall.result!!.take(50)}" else ""}").apply {
-            this.icon = icon
-            foreground = JBColor(0x8B949E, 0x8B949E)
-            font = font.deriveFont(10f)
-        }
-
-        // Keep only last 10 tool calls
-        if (toolCallPanel.componentCount > 10) {
-            toolCallPanel.remove(0)
-        }
-        toolCallPanel.add(label)
-        toolCallPanel.revalidate()
-        toolCallPanel.repaint()
-    }
-
-    private fun trimOutput() {
-        val doc = outputArea.document
-        val maxChars = 10000
-        if (doc.length > maxChars) {
-            val removeLen = doc.length - maxChars
-            doc.remove(0, removeLen)
-        }
     }
 }

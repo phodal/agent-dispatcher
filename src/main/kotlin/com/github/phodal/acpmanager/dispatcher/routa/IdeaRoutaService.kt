@@ -21,6 +21,7 @@ import com.phodal.routa.core.provider.CapabilityBasedRouter
 import com.phodal.routa.core.provider.KoogAgentProvider
 import com.phodal.routa.core.provider.ResilientAgentProvider
 import com.phodal.routa.core.provider.StreamChunk
+import com.phodal.routa.core.role.RouteDefinitions
 import com.phodal.routa.core.runner.OrchestratorPhase
 import com.phodal.routa.core.runner.OrchestratorResult
 import com.phodal.routa.core.runner.RoutaOrchestrator
@@ -105,6 +106,10 @@ class IdeaRoutaService(private val project: Project) : Disposable {
     val routaModelKey = MutableStateFlow("")
     val gateModelKey = MutableStateFlow("")
 
+    /** Whether to use ACP Agent for ROUTA planning (instead of KoogAgent). */
+    private val _useAcpForRouta = MutableStateFlow(true)
+    val useAcpForRouta: StateFlow<Boolean> = _useAcpForRouta.asStateFlow()
+
     /** The active LLM model config for ROUTA/GATE (KoogAgent). */
     private val _llmModelConfig = MutableStateFlow<NamedModelConfig?>(null)
     val llmModelConfig: StateFlow<NamedModelConfig?> = _llmModelConfig.asStateFlow()
@@ -162,9 +167,13 @@ class IdeaRoutaService(private val project: Project) : Disposable {
      *
      * This matches the architecture used in [RoutaCli].
      *
+     * When [useAcpForRouta] is true (default), ROUTA planning is done via ACP Agent
+     * with the system prompt from [RouteDefinitions.ROUTA] prepended to user requests.
+     * This allows the ACP agent to analyze the project and generate tasks.
+     *
      * @param crafterAgent ACP agent key for CRAFTERs
-     * @param routaAgent ACP agent key for ROUTA (used as fallback if no LLM config)
-     * @param gateAgent ACP agent key for GATE (used as fallback if no LLM config)
+     * @param routaAgent ACP agent key for ROUTA
+     * @param gateAgent ACP agent key for GATE
      */
     fun initialize(
         crafterAgent: String,
@@ -186,21 +195,26 @@ class IdeaRoutaService(private val project: Project) : Disposable {
         // Build capability-based router (like RoutaCli.buildProvider)
         val providers = mutableListOf<AgentProvider>()
 
-        // 1. KoogAgentProvider for ROUTA (planning via LLM with tool calling)
-        val modelConfig = _llmModelConfig.value ?: RoutaConfigLoader.getActiveModelConfig()
-        if (modelConfig != null) {
-            val koog: AgentProvider = KoogAgentProvider(
-                agentTools = system.tools,
-                workspaceId = workspaceId,
-                modelConfig = modelConfig,
-            )
-            providers.add(ResilientAgentProvider(koog, system.context.conversationStore))
-            log.info("Added KoogAgentProvider for ROUTA/GATE: ${modelConfig.provider}/${modelConfig.model}")
+        // When useAcpForRouta is false, add KoogAgentProvider for ROUTA (LLM with tool calling)
+        // When useAcpForRouta is true, skip Koog and let ACP handle ROUTA too
+        if (!_useAcpForRouta.value) {
+            val modelConfig = _llmModelConfig.value ?: RoutaConfigLoader.getActiveModelConfig()
+            if (modelConfig != null) {
+                val koog: AgentProvider = KoogAgentProvider(
+                    agentTools = system.tools,
+                    workspaceId = workspaceId,
+                    modelConfig = modelConfig,
+                )
+                providers.add(ResilientAgentProvider(koog, system.context.conversationStore))
+                log.info("Added KoogAgentProvider for ROUTA/GATE: ${modelConfig.provider}/${modelConfig.model}")
+            } else {
+                log.warn("No LLM config found. ROUTA/GATE will fall back to ACP provider.")
+            }
         } else {
-            log.warn("No LLM config found. ROUTA/GATE will fall back to ACP provider.")
+            log.info("Using ACP Agent for ROUTA planning (useAcpForRouta=true)")
         }
 
-        // 2. IdeaAcpAgentProvider for CRAFTER (real coding agents)
+        // IdeaAcpAgentProvider for CRAFTER and ROUTA (when useAcpForRouta=true)
         val ideaAcpProvider = IdeaAcpAgentProvider(
             project = project,
             scope = scope,
@@ -211,7 +225,7 @@ class IdeaRoutaService(private val project: Project) : Disposable {
         acpProvider = ideaAcpProvider
         providers.add(ideaAcpProvider)
 
-        // 3. Build the CapabilityBasedRouter
+        // Build the CapabilityBasedRouter
         val capRouter = CapabilityBasedRouter(*providers.toTypedArray())
         router = capRouter
 
@@ -233,10 +247,8 @@ class IdeaRoutaService(private val project: Project) : Disposable {
 
         // Log provider routing info
         val routerInfo = capRouter.listProviders().joinToString(", ") { "${it.name}[p=${it.priority}]" }
-        log.info("IdeaRoutaService initialized: crafter=$crafterAgent, providers=[$routerInfo]")
-        if (modelConfig != null) {
-            log.info("ROUTA/GATE LLM: ${modelConfig.provider}/${modelConfig.model}")
-        }
+        val routaMode = if (_useAcpForRouta.value) "ACP Agent ($routaAgent)" else "KoogAgent"
+        log.info("IdeaRoutaService initialized: crafter=$crafterAgent, routa=$routaMode, providers=[$routerInfo]")
 
         // Pre-connect a crafter session to start MCP server for coordination tools
         scope.launch {
@@ -280,8 +292,16 @@ class IdeaRoutaService(private val project: Project) : Disposable {
         agentRoleMap.clear()
         crafterTaskMap.clear()
 
+        // When using ACP for ROUTA, prepend the system prompt from RouteDefinitions
+        // This provides the ROUTA role context that would normally be injected by KoogAgent
+        val enhancedRequest = if (_useAcpForRouta.value) {
+            buildRoutaEnhancedPrompt(userRequest)
+        } else {
+            userRequest
+        }
+
         return try {
-            val result = orch.execute(userRequest)
+            val result = orch.execute(enhancedRequest)
             _result.value = result
             result
         } catch (e: Exception) {
@@ -291,6 +311,33 @@ class IdeaRoutaService(private val project: Project) : Disposable {
             failedResult
         } finally {
             _isRunning.value = false
+        }
+    }
+
+    /**
+     * Build an enhanced prompt for ROUTA when using ACP Agent.
+     *
+     * Prepends the ROUTA system prompt from [RouteDefinitions.ROUTA] to the user request,
+     * so the ACP agent has the same context that KoogAgent would inject as system prompt.
+     */
+    private fun buildRoutaEnhancedPrompt(userRequest: String): String {
+        val routaSystemPrompt = RouteDefinitions.ROUTA.systemPrompt
+        val routaRoleReminder = RouteDefinitions.ROUTA.roleReminder
+
+        return buildString {
+            appendLine("# ROUTA Coordinator Instructions")
+            appendLine()
+            appendLine(routaSystemPrompt)
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("**Role Reminder:** $routaRoleReminder")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("# User Request")
+            appendLine()
+            appendLine(userRequest)
         }
     }
 
@@ -342,9 +389,23 @@ class IdeaRoutaService(private val project: Project) : Disposable {
                 agentRoleMap[phase.crafterId] = AgentRole.CRAFTER
                 crafterTaskMap[phase.crafterId] = phase.taskId
 
-                // Get task title from the store
+                // Get task title from the store with fallback logic
                 val task = routaSystem?.context?.taskStore?.get(phase.taskId)
-                val title = task?.title ?: phase.taskId
+                val title = when {
+                    task?.title?.isNotBlank() == true -> task.title
+                    // Try to get from coordination state's task list
+                    else -> {
+                        val allTasks = routaSystem?.context?.taskStore?.listByWorkspace(
+                            routaSystem?.coordinator?.coordinationState?.value?.workspaceId ?: ""
+                        )
+                        val matchingTask = allTasks?.find { it.id == phase.taskId }
+                        matchingTask?.title?.takeIf { it.isNotBlank() }
+                            ?: "Task ${phase.taskId.take(8)}..."
+                    }
+                }
+
+                log.info("CrafterRunning: crafterId=${phase.crafterId.take(8)}, taskId=${phase.taskId.take(8)}, " +
+                    "title='$title', taskFromStore=${task != null}")
 
                 updateCrafterState(phase.crafterId) {
                     CrafterStreamState(
@@ -437,6 +498,25 @@ class IdeaRoutaService(private val project: Project) : Disposable {
             is AgentEvent.TaskDelegated -> {
                 agentRoleMap[event.agentId] = AgentRole.CRAFTER
                 crafterTaskMap[event.agentId] = event.taskId
+            }
+
+            is AgentEvent.AgentCompleted -> {
+                // Convert completion report to StreamChunk and emit to UI
+                val role = agentRoleMap[event.agentId]
+                if (role == AgentRole.CRAFTER) {
+                    val report = event.report
+                    val completionChunk = StreamChunk.CompletionReport(
+                        agentId = event.agentId,
+                        taskId = report.taskId,
+                        summary = report.summary,
+                        filesModified = report.filesModified,
+                        success = report.success,
+                    )
+                    _crafterChunks.tryEmit(event.agentId to completionChunk)
+
+                    log.info("AgentCompleted: agentId=${event.agentId.take(8)}, " +
+                        "taskId=${report.taskId.take(8)}, success=${report.success}")
+                }
             }
 
             else -> {}

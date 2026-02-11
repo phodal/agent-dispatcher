@@ -9,6 +9,7 @@ import com.phodal.routa.core.model.AgentRole
 import com.phodal.routa.core.provider.AgentProvider
 import com.phodal.routa.core.provider.ProviderCapabilities
 import com.phodal.routa.core.provider.StreamChunk
+import com.phodal.routa.core.provider.ThinkingPhase
 import com.phodal.routa.core.provider.ToolCallStatus
 import kotlinx.coroutines.*
 import java.util.concurrent.ConcurrentHashMap
@@ -100,9 +101,16 @@ class IdeaAcpAgentProvider(
                         )
                     }
 
+                    is RenderEvent.ThinkingStart -> {
+                        onChunk(StreamChunk.Thinking("", ThinkingPhase.START))
+                    }
+
                     is RenderEvent.ThinkingChunk -> {
-                        // Forward thinking as text chunks with a prefix
-                        onChunk(StreamChunk.Text("[thinking] ${event.content}"))
+                        onChunk(StreamChunk.Thinking(event.content, ThinkingPhase.CHUNK))
+                    }
+
+                    is RenderEvent.ThinkingEnd -> {
+                        onChunk(StreamChunk.Thinking(event.fullContent, ThinkingPhase.END))
                     }
 
                     is RenderEvent.Error -> {
@@ -156,6 +164,7 @@ class IdeaAcpAgentProvider(
             supportsHealthCheck = true,
             supportsFileEditing = true,
             supportsTerminal = true,
+            supportsToolCalling = true, // ACP agents handle tools internally (e.g., Claude Code)
             maxConcurrentAgents = 5,
             priority = 10,
         )

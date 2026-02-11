@@ -108,24 +108,38 @@ class DispatcherPanel(
             routaService.crafterModelKey.value = model
 
             // Update ROUTA section status text to reflect new CRAFTER
-            val llmInfo = routaService.getActiveLlmConfig()?.let { config ->
-                "ROUTA: ${config.provider}/${config.model} (KoogAgent)"
-            } ?: "ROUTA: fallback to ACP"
-            routaSection.setPlanningText("✓ Ready. CRAFTER: $model | $llmInfo")
+            // Since we now use ACP for ROUTA, show the ACP agent info
+            val routaInfo = if (routaService.useAcpForRouta.value) {
+                "ROUTA: $model (ACP Agent)"
+            } else {
+                routaService.getActiveLlmConfig()?.let { config ->
+                    "ROUTA: ${config.provider}/${config.model} (KoogAgent)"
+                } ?: "ROUTA: fallback to ACP"
+            }
+            routaSection.setPlanningText("✓ Ready. CRAFTER: $model | $routaInfo")
         }
 
-        // Wire up ROUTA model change (LLM model selection for KoogAgent)
+        // Wire up ROUTA model change (LLM model selection for KoogAgent, or ACP agent selection)
         routaSection.onModelChanged = { modelName ->
-            val configs = routaService.getAvailableLlmConfigs()
-            val selected = configs.find { it.name == modelName }
-            if (selected != null) {
-                routaService.setLlmModelConfig(selected)
-                log.info("ROUTA LLM model changed to: ${selected.provider}/${selected.model}")
+            if (routaService.useAcpForRouta.value) {
+                // When using ACP for ROUTA, the model selector changes the ACP agent
+                routaService.routaModelKey.value = modelName
+                log.info("ROUTA ACP agent changed to: $modelName")
 
-                // Update ROUTA section status text to reflect new LLM model
                 val crafterModel = routaService.crafterModelKey.value
-                val llmInfo = "ROUTA: ${selected.provider}/${selected.model} (KoogAgent)"
-                routaSection.setPlanningText("✓ Ready. CRAFTER: $crafterModel | $llmInfo")
+                routaSection.setPlanningText("✓ Ready. CRAFTER: $crafterModel | ROUTA: $modelName (ACP Agent)")
+            } else {
+                // Legacy: use LLM configs for KoogAgent
+                val configs = routaService.getAvailableLlmConfigs()
+                val selected = configs.find { it.name == modelName }
+                if (selected != null) {
+                    routaService.setLlmModelConfig(selected)
+                    log.info("ROUTA LLM model changed to: ${selected.provider}/${selected.model}")
+
+                    val crafterModel = routaService.crafterModelKey.value
+                    val llmInfo = "ROUTA: ${selected.provider}/${selected.model} (KoogAgent)"
+                    routaSection.setPlanningText("✓ Ready. CRAFTER: $crafterModel | $llmInfo")
+                }
             }
         }
     }
@@ -212,35 +226,42 @@ class DispatcherPanel(
     private fun loadAgents() {
         scope.launch(Dispatchers.IO) {
             try {
-                log.info("Loading ACP agents and LLM configs...")
+                log.info("Loading ACP agents...")
                 configService.reloadConfig()
                 val config = configService.loadConfig()
                 val agentKeys = config.agents.keys.toList()
 
-                // Load LLM configs for ROUTA (KoogAgent)
-                val llmConfigs = routaService.getAvailableLlmConfigs()
-                val activeLlmConfig = routaService.getActiveLlmConfig()
+                // When using ACP for ROUTA (default), we use ACP agents for ROUTA selector
+                val useAcpForRouta = routaService.useAcpForRouta.value
 
                 withContext(Dispatchers.EDT) {
-                    // Set available LLM models for ROUTA section
-                    if (llmConfigs.isNotEmpty()) {
-                        val modelNames = llmConfigs.map { it.name.ifBlank { "${it.provider}/${it.model}" } }
-                        routaSection.setAvailableModels(modelNames)
-
-                        if (activeLlmConfig != null) {
-                            val activeName = activeLlmConfig.name.ifBlank { "${activeLlmConfig.provider}/${activeLlmConfig.model}" }
-                            routaSection.setSelectedModel(activeName)
-                        }
-                        log.info("ROUTA LLM: ${llmConfigs.size} model(s) available, active=${activeLlmConfig?.let { "${it.provider}/${it.model}" } ?: "none"}")
-                    } else {
-                        log.warn("No LLM configs found at ~/.autodev/config.yaml — ROUTA will use ACP agent as fallback")
-                    }
-
                     if (agentKeys.isEmpty()) {
                         val msg = "⚠️ No ACP agents detected. Configure agents in ~/.acp-manager/config.yaml"
                         log.warn(msg)
                         routaSection.setPlanningText(msg)
                         return@withContext
+                    }
+
+                    // Set available ACP agents for both ROUTA and CRAFTER selectors
+                    if (useAcpForRouta) {
+                        // ROUTA uses ACP agents - populate ROUTA selector with ACP agents
+                        routaSection.setAvailableModels(agentKeys)
+                        log.info("ROUTA: Using ACP Agent mode. ${agentKeys.size} agent(s) available.")
+                    } else {
+                        // Legacy mode: ROUTA uses LLM configs (KoogAgent)
+                        val llmConfigs = routaService.getAvailableLlmConfigs()
+                        val activeLlmConfig = routaService.getActiveLlmConfig()
+                        if (llmConfigs.isNotEmpty()) {
+                            val modelNames = llmConfigs.map { it.name.ifBlank { "${it.provider}/${it.model}" } }
+                            routaSection.setAvailableModels(modelNames)
+                            if (activeLlmConfig != null) {
+                                val activeName = activeLlmConfig.name.ifBlank { "${activeLlmConfig.provider}/${activeLlmConfig.model}" }
+                                routaSection.setSelectedModel(activeName)
+                            }
+                            log.info("ROUTA LLM: ${llmConfigs.size} model(s) available")
+                        } else {
+                            log.warn("No LLM configs found — ROUTA will use ACP agent as fallback")
+                        }
                     }
 
                     // Set available ACP agents for CRAFTERs
@@ -249,20 +270,30 @@ class DispatcherPanel(
                     val defaultAgent = config.activeAgent ?: agentKeys.firstOrNull()
                     if (defaultAgent != null) {
                         crafterSection.setSelectedModel(defaultAgent)
+                        if (useAcpForRouta) {
+                            routaSection.setSelectedModel(defaultAgent)
+                        }
+
                         // Initialize the Routa service with the default agent
-                        log.info("Initializing Routa service: CRAFTER=$defaultAgent, ROUTA=KoogAgent(${activeLlmConfig?.model ?: "fallback"})")
+                        val routaMode = if (useAcpForRouta) "ACP Agent ($defaultAgent)" else "KoogAgent"
+                        log.info("Initializing Routa service: CRAFTER=$defaultAgent, ROUTA=$routaMode")
                         routaService.initialize(
                             crafterAgent = defaultAgent,
                             routaAgent = defaultAgent,
                             gateAgent = defaultAgent,
                         )
 
-                        val llmInfo = if (activeLlmConfig != null) {
-                            "ROUTA: ${activeLlmConfig.provider}/${activeLlmConfig.model} (KoogAgent)"
+                        val routaInfo = if (useAcpForRouta) {
+                            "ROUTA: $defaultAgent (ACP Agent)"
                         } else {
-                            "ROUTA: fallback to ACP"
+                            val llmConfig = routaService.getActiveLlmConfig()
+                            if (llmConfig != null) {
+                                "ROUTA: ${llmConfig.provider}/${llmConfig.model} (KoogAgent)"
+                            } else {
+                                "ROUTA: fallback to ACP"
+                            }
                         }
-                        routaSection.setPlanningText("✓ Ready. CRAFTER: $defaultAgent | $llmInfo")
+                        routaSection.setPlanningText("✓ Ready. CRAFTER: $defaultAgent | $routaInfo")
                     } else {
                         log.warn("No default agent found")
                         routaSection.setPlanningText("⚠️ No default agent configured")
@@ -331,9 +362,10 @@ class DispatcherPanel(
             }
         }
 
-        // Observe MCP server URL
+        // Observe MCP server URL - show in both ROUTA and CRAFTER sections
         scope.launch {
             routaService.mcpServerUrl.collectLatest { url ->
+                routaSection.setMcpServerUrl(url)
                 crafterSection.setMcpServerUrl(url)
             }
         }
