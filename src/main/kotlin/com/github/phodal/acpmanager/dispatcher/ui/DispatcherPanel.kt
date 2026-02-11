@@ -100,6 +100,19 @@ class DispatcherPanel(
 
     private var currentMcpUrl: String? = null
 
+    // Agent selector components (for unified input panel)
+    private val agentLabel = JBLabel("Select Agent").apply {
+        foreground = JBColor(0x8B949E, 0x8B949E)
+        font = font.deriveFont(11f)
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        toolTipText = "Click to change agent"
+    }
+
+    private val agentPopup = JPopupMenu().apply {
+        background = JBColor(0x161B22, 0x161B22)
+        border = BorderFactory.createLineBorder(JBColor(0x30363D, 0x30363D))
+    }
+
     init {
         setupUI()
         loadAgents()
@@ -198,24 +211,54 @@ class DispatcherPanel(
             background = JBColor(0x161B22, 0x161B22)
             border = JBUI.Borders.compound(
                 JBUI.Borders.customLineTop(JBColor(0x21262D, 0x21262D)),
-                JBUI.Borders.empty(6, 12)
+                JBUI.Borders.empty(8, 12)
             )
         }
 
-        val inputArea = JBTextArea(2, 40).apply {
+        // ── Unified input container (Agent + Input + Execute as one block) ──
+        val unifiedContainer = JPanel(BorderLayout()).apply {
+            isOpaque = true
+            background = JBColor(0x0D1117, 0x0D1117)
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(JBColor(0x30363D, 0x30363D), 1, true),
+                JBUI.Borders.empty(0)
+            )
+        }
+
+        // ── Top row: Agent selector (looks like plain text with settings icon) ──
+        val settingsIcon = JBLabel(AllIcons.General.Settings).apply {
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Select Agent"
+            border = JBUI.Borders.empty(0, 8, 0, 4)
+        }
+
+        val agentRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(6, 4, 2, 4)
+            add(settingsIcon)
+            add(agentLabel)
+        }
+
+        // Click handlers for agent selection
+        val showAgentPopup = { e: MouseEvent ->
+            agentPopup.show(e.component, 0, e.component.height)
+        }
+        settingsIcon.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) = showAgentPopup(e)
+        })
+        agentLabel.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) = showAgentPopup(e)
+        })
+
+        // ── Center: Input text area ──
+        val inputArea = JBTextArea(3, 40).apply {
             lineWrap = true
             wrapStyleWord = true
             background = JBColor(0x0D1117, 0x0D1117)
             foreground = JBColor(0xC9D1D9, 0xC9D1D9)
-            border = JBUI.Borders.compound(
-                BorderFactory.createLineBorder(JBColor(0x30363D, 0x30363D)),
-                JBUI.Borders.empty(6, 8)
-            )
-            font = Font("SansSerif", Font.PLAIN, 12)
+            border = JBUI.Borders.empty(4, 12, 4, 12)
+            font = Font("SansSerif", Font.PLAIN, 13)
         }
-
-        // Placeholder text
-        inputArea.text = ""
         inputArea.toolTipText = "Describe your task... (Enter to send, Shift+Enter for newline)"
 
         inputArea.addKeyListener(object : KeyAdapter() {
@@ -231,16 +274,29 @@ class DispatcherPanel(
             }
         })
 
-        val sendButton = JButton("Execute").apply {
-            icon = AllIcons.Actions.Execute
-            toolTipText = "Execute through Routa → CRAFTERs → GATE pipeline"
-            preferredSize = Dimension(100, 32)
+        val inputScroll = JScrollPane(inputArea).apply {
+            border = JBUI.Borders.empty()
+            isOpaque = false
+            viewport.isOpaque = false
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }
 
-        val stopButton = JButton("Stop").apply {
-            icon = AllIcons.Actions.Suspend
-            toolTipText = "Stop all running agents"
-            preferredSize = Dimension(100, 32)
+        // ── Bottom row: Execute/Stop button (right-aligned) ──
+        val sendButton = JButton(AllIcons.Actions.Execute).apply {
+            toolTipText = "Execute (Enter)"
+            preferredSize = Dimension(32, 28)
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+
+        val stopButton = JButton(AllIcons.Actions.Suspend).apply {
+            toolTipText = "Stop all agents"
+            preferredSize = Dimension(32, 28)
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             isVisible = false
         }
 
@@ -267,45 +323,26 @@ class DispatcherPanel(
             }
         }
 
-        val inputScroll = JScrollPane(inputArea).apply {
-            border = JBUI.Borders.empty()
-            preferredSize = Dimension(0, 48)
-        }
-
-        // Button panel to hold both send and stop buttons
-        val buttonPanel = JPanel(CardLayout()).apply {
+        val buttonRow = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
-            add(sendButton, "send")
-            add(stopButton, "stop")
+            border = JBUI.Borders.empty(2, 4, 6, 8)
+            add(sendButton)
+            add(stopButton)
         }
 
-        // Agent selector panel (left of input)
-        val agentSelectorPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque = false
-            add(JBLabel("Agent:").apply {
-                foreground = JBColor(0x8B949E, 0x8B949E)
-                font = font.deriveFont(10f)
-            })
-            add(routaSection.getModelCombo())
-        }
+        // Assemble unified container
+        unifiedContainer.add(agentRow, BorderLayout.NORTH)
+        unifiedContainer.add(inputScroll, BorderLayout.CENTER)
+        unifiedContainer.add(buttonRow, BorderLayout.SOUTH)
 
-        val topRow = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(agentSelectorPanel, BorderLayout.WEST)
-            add(inputScroll, BorderLayout.CENTER)
-            add(buttonPanel, BorderLayout.EAST)
-        }
-
-        // Create bottom panel with hint label and MCP status
+        // ── Bottom status panel (hint + MCP status) ──
         val bottomPanel = JPanel(BorderLayout()).apply {
             isOpaque = false
-            border = JBUI.Borders.emptyTop(4)
+            border = JBUI.Borders.emptyTop(6)
         }
 
-        // Left side: hint label
         bottomPanel.add(hintLabel, BorderLayout.WEST)
 
-        // Right side: MCP status panel
         val mcpStatusPanel = JPanel().apply {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.X_AXIS)
@@ -333,10 +370,38 @@ class DispatcherPanel(
             checkMcpServerStatus()
         }
 
-        panel.add(topRow, BorderLayout.CENTER)
+        panel.add(unifiedContainer, BorderLayout.CENTER)
         panel.add(bottomPanel, BorderLayout.SOUTH)
 
         return panel
+    }
+
+    /**
+     * Update the agent popup menu with available agents.
+     * Called after agents are loaded.
+     */
+    private fun updateAgentPopup(agents: List<String>, selectedAgent: String?) {
+        agentPopup.removeAll()
+        val agentCombo = routaSection.getModelCombo()
+
+        for (agent in agents) {
+            val menuItem = JMenuItem(agent).apply {
+                background = JBColor(0x161B22, 0x161B22)
+                foreground = JBColor(0xC9D1D9, 0xC9D1D9)
+                addActionListener {
+                    agentCombo.selectedItem = agent
+                    agentLabel.text = agent
+                }
+            }
+            agentPopup.add(menuItem)
+        }
+
+        // Update the label with selected agent
+        if (selectedAgent != null) {
+            agentLabel.text = selectedAgent
+        } else if (agents.isNotEmpty()) {
+            agentLabel.text = agents.first()
+        }
     }
 
     // ── Agent Loading ───────────────────────────────────────────────────
@@ -385,12 +450,23 @@ class DispatcherPanel(
                     // Set available ACP agents for CRAFTERs
                     crafterSection.setAvailableModels(agentKeys)
 
-                    val defaultAgent = config.activeAgent ?: agentKeys.firstOrNull()
+                    // Prefer "claude" as default agent, fallback to config.activeAgent or first available
+                    val defaultAgent = when {
+                        agentKeys.any { it.equals("claude", ignoreCase = true) } ->
+                            agentKeys.first { it.equals("claude", ignoreCase = true) }
+                        config.activeAgent != null && agentKeys.contains(config.activeAgent) ->
+                            config.activeAgent
+                        else -> agentKeys.firstOrNull()
+                    }
+
                     if (defaultAgent != null) {
                         crafterSection.setSelectedModel(defaultAgent)
                         if (useAcpForRouta) {
                             routaSection.setSelectedModel(defaultAgent)
                         }
+
+                        // Update the agent popup in the unified input panel
+                        updateAgentPopup(agentKeys, defaultAgent)
 
                         // Initialize the Routa service with the default agent
                         val routaMode = if (useAcpForRouta) "ACP Agent ($defaultAgent)" else "KoogAgent"
@@ -415,6 +491,7 @@ class DispatcherPanel(
                     } else {
                         log.warn("No default agent found")
                         routaSection.setPlanningText("⚠️ No default agent configured")
+                        updateAgentPopup(agentKeys, null)
                     }
 
                     log.info("Dispatcher ready. ${agentKeys.size} ACP agent(s): ${agentKeys.joinToString(", ")}")
