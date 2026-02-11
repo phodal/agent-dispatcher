@@ -163,6 +163,14 @@ sealed class RenderEvent {
     ) : RenderEvent()
 
     /**
+     * Clear all rendered content (for new session).
+     */
+    data class Clear(
+        val agentKey: String,
+        override val timestamp: Long = System.currentTimeMillis(),
+    ) : RenderEvent()
+
+    /**
      * Prompt completed.
      */
     data class PromptComplete(

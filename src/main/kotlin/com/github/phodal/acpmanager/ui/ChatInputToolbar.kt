@@ -33,6 +33,7 @@ class ChatInputToolbar(
     val agentSelector = AgentSelectorPanel(project)
     private val sendButton = JButton("Send", AllIcons.Actions.Execute)
     private val stopButton = JButton("Stop", AllIcons.Actions.Suspend)
+    private val newSessionButton = JButton(AllIcons.Actions.Restart)
     private val statusLabel = JBLabel()
 
     // Completion trigger buttons
@@ -51,6 +52,7 @@ class ChatInputToolbar(
             // Show/hide buttons based on whether callbacks are set
             commandButton.isVisible = value != null
         }
+    var onNewSessionClick: (() -> Unit)? = null
 
     private var isProcessing = false
 
@@ -102,9 +104,20 @@ class ChatInputToolbar(
         }
         add(leftPanel, BorderLayout.WEST)
 
-        // Right side: Send/Stop buttons
+        // Right side: New Session + Send/Stop buttons
         val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
+
+            // New Session button
+            newSessionButton.apply {
+                toolTipText = "Start new session (clear history and reconnect)"
+                preferredSize = Dimension(28, 28)
+                isContentAreaFilled = false
+                isBorderPainted = false
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addActionListener { onNewSessionClick?.invoke() }
+            }
+            add(newSessionButton)
 
             // Send button
             sendButton.apply {
@@ -139,6 +152,7 @@ class ChatInputToolbar(
         sendButton.isVisible = !processing
         stopButton.isVisible = processing
         agentSelector.isEnabled = !processing
+        newSessionButton.isEnabled = !processing
     }
 
     fun setSendEnabled(enabled: Boolean) {

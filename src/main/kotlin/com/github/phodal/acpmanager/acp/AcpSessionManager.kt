@@ -682,6 +682,33 @@ class AgentSession(
         updateState { copy(messages = emptyList(), currentStreamingText = "", currentThinkingText = "") }
     }
 
+    /**
+     * Start a new session by disconnecting, clearing history, and reconnecting.
+     * This implements the ACP Protocol "new session" schema.
+     */
+    suspend fun newSession(config: AcpAgentConfig) {
+        log.info("Starting new session for '$agentKey'")
+
+        // Disconnect current session
+        disconnect()
+
+        // Clear all messages and state
+        clearMessages()
+
+        // Clear tool call tracking
+        renderedToolCallIds.clear()
+        toolCallTitles.clear()
+        startedToolCallIds.clear()
+
+        // Emit a clear event to the renderer
+        emitRenderEvent(RenderEvent.Clear(agentKey))
+
+        // Reconnect
+        connect(config)
+
+        log.info("New session started for '$agentKey'")
+    }
+
     private fun addMessage(message: ChatMessage) {
         updateState { copy(messages = messages + message) }
     }
@@ -797,6 +824,24 @@ class AcpSessionManager(private val project: Project) : Disposable {
         if (_activeSessionKey.value == agentKey) {
             _activeSessionKey.value = sessions.keys.firstOrNull()
         }
+    }
+
+    /**
+     * Start a new session for the given agent.
+     * This disconnects the current session, clears history, and reconnects.
+     * Implements the ACP Protocol "new session" schema.
+     */
+    suspend fun newSession(agentKey: String): AgentSession {
+        val configService = AcpConfigService.getInstance(project)
+        val config = configService.getAgentConfig(agentKey)
+            ?: throw IllegalArgumentException("Agent '$agentKey' not found in config")
+
+        val session = getOrCreateSession(agentKey)
+        session.newSession(config)
+        setActiveSession(agentKey)
+
+        log.info("New session started for agent '$agentKey'")
+        return session
     }
 
     /**

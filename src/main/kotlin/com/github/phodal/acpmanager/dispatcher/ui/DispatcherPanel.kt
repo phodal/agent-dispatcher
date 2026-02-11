@@ -300,6 +300,14 @@ class DispatcherPanel(
             isVisible = false
         }
 
+        val newSessionButton = JButton(AllIcons.Actions.Restart).apply {
+            toolTipText = "Start new session (clear all panels)"
+            preferredSize = Dimension(32, 28)
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+
         sendButton.addActionListener {
             val text = inputArea.text.trim()
             if (text.isNotEmpty()) {
@@ -312,6 +320,10 @@ class DispatcherPanel(
             stopExecution()
         }
 
+        newSessionButton.addActionListener {
+            startNewSession()
+        }
+
         // Observe isRunning to toggle send/stop buttons
         scope.launch {
             routaService.isRunning.collectLatest { isRunning ->
@@ -319,6 +331,7 @@ class DispatcherPanel(
                     sendButton.isVisible = !isRunning
                     stopButton.isVisible = isRunning
                     inputArea.isEnabled = !isRunning
+                    newSessionButton.isEnabled = !isRunning
                 }
             }
         }
@@ -326,6 +339,7 @@ class DispatcherPanel(
         val buttonRow = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
             isOpaque = false
             border = JBUI.Borders.empty(2, 4, 6, 8)
+            add(newSessionButton)
             add(sendButton)
             add(stopButton)
         }
@@ -698,6 +712,18 @@ class DispatcherPanel(
         routaSection.appendChunk(
             com.phodal.routa.core.provider.StreamChunk.Text("\n\n⏹ Execution stopped by user.")
         )
+    }
+
+    /**
+     * Start a new session - clears all panels and resets state.
+     */
+    private fun startNewSession() {
+        log.info("Starting new session...")
+        routaSection.clear()
+        crafterSection.clear()
+        gateSection.clear()
+        routaSection.updatePhase(CoordinationPhase.IDLE)
+        routaSection.setPlanningText("✓ New session started. Ready for input.")
     }
 
     private fun handleResult(result: OrchestratorResult) {

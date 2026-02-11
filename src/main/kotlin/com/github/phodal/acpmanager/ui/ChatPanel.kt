@@ -1,5 +1,6 @@
 package com.github.phodal.acpmanager.ui
 
+import com.github.phodal.acpmanager.acp.AcpSessionManager
 import com.github.phodal.acpmanager.acp.AgentSession
 import com.github.phodal.acpmanager.acp.AgentSessionState
 import com.github.phodal.acpmanager.acp.MessageReference
@@ -131,6 +132,10 @@ class ChatPanel(
                 log.info("ChatPanel: onCommandClick triggered")
                 inputArea.requestFocusInWindow()
                 completionManager.triggerCommandCompletion()
+            }
+            onNewSessionClick = {
+                log.info("ChatPanel: onNewSessionClick triggered")
+                startNewSession()
             }
         }
 
@@ -346,6 +351,24 @@ class ChatPanel(
     private fun cancelMessage() {
         scope.launch(Dispatchers.IO) {
             session.cancelPrompt()
+        }
+    }
+
+    /**
+     * Start a new session - clears history and reconnects.
+     */
+    private fun startNewSession() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val sessionManager = AcpSessionManager.getInstance(project)
+                sessionManager.newSession(session.agentKey)
+                log.info("New session started for '${session.agentKey}'")
+            } catch (e: Exception) {
+                log.warn("Failed to start new session for '${session.agentKey}'", e)
+                ApplicationManager.getApplication().invokeLater {
+                    inputToolbar.setStatusText("Error: ${e.message}")
+                }
+            }
         }
     }
 

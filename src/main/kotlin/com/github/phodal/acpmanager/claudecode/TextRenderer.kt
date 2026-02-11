@@ -95,6 +95,10 @@ class TextRenderer(
                 val tasks = event.tasks.joinToString(", ") { "${it.title}:${it.status}" }
                 "[TASKS] $tasks"
             }
+            is RenderEvent.Clear -> {
+                clear()
+                "[CLEAR] ${event.agentKey}"
+            }
         }
     }
 

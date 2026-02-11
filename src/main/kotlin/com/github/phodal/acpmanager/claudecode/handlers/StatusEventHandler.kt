@@ -11,7 +11,7 @@ import javax.swing.JPanel
 import kotlin.reflect.KClass
 
 /**
- * Handler for status events (Info, Error, Connected, Disconnected, PromptComplete).
+ * Handler for status events (Info, Error, Connected, Disconnected, PromptComplete, Clear).
  */
 class StatusEventHandler : MultiEventHandler() {
 
@@ -22,7 +22,8 @@ class StatusEventHandler : MultiEventHandler() {
         RenderEvent.Disconnected::class,
         RenderEvent.PromptComplete::class,
         RenderEvent.ModeChange::class,
-        RenderEvent.PlanUpdate::class
+        RenderEvent.PlanUpdate::class,
+        RenderEvent.Clear::class
     )
 
     override fun handle(event: RenderEvent, context: RenderContext) {
@@ -34,6 +35,7 @@ class StatusEventHandler : MultiEventHandler() {
             is RenderEvent.PromptComplete -> { /* Ignore */ }
             is RenderEvent.ModeChange -> { /* Ignore */ }
             is RenderEvent.PlanUpdate -> { /* Plan updates handled separately */ }
+            is RenderEvent.Clear -> context.clear()
             else -> {}
         }
     }
