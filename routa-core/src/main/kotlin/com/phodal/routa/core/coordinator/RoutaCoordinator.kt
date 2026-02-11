@@ -284,10 +284,10 @@ class RoutaCoordinator(
     }
 
     private suspend fun handleEvent(event: AgentEvent) {
+        val state = _coordinationState.value
+
         when (event) {
             is AgentEvent.AgentCompleted -> {
-                val state = _coordinationState.value
-
                 // If a Crafter completed, check if all Crafters in this wave are done
                 val completedAgent = context.agentStore.get(event.agentId)
                 if (completedAgent?.role == AgentRole.CRAFTER) {
@@ -329,7 +329,52 @@ class RoutaCoordinator(
                     }
                 }
             }
-            else -> { /* Other events are informational */ }
+
+            is AgentEvent.AgentStatusChanged -> {
+                // Track ERROR status — if an active Crafter errors, treat same as completion
+                if (event.newStatus == AgentStatus.ERROR) {
+                    val activeCrafters = state.activeCrafterIds
+                    if (event.agentId in activeCrafters) {
+                        val allDone = activeCrafters.all { crafterId ->
+                            val agent = context.agentStore.get(crafterId)
+                            agent?.status == AgentStatus.COMPLETED || agent?.status == AgentStatus.ERROR
+                        }
+                        if (allDone) {
+                            _coordinationState.value = state.copy(
+                                phase = CoordinationPhase.WAVE_COMPLETE,
+                                activeCrafterIds = emptyList(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            is AgentEvent.TaskStatusChanged -> {
+                // Track task failures for FAILED phase transition
+                if (event.newStatus == TaskStatus.CANCELLED) {
+                    val allTasks = context.taskStore.listByWorkspace(state.workspaceId)
+                    val allDoneOrCancelled = allTasks.all {
+                        it.status == TaskStatus.COMPLETED || it.status == TaskStatus.CANCELLED
+                    }
+                    if (allDoneOrCancelled && allTasks.isNotEmpty()) {
+                        _coordinationState.value = state.copy(
+                            phase = CoordinationPhase.COMPLETED,
+                        )
+                    }
+                }
+            }
+
+            is AgentEvent.TaskDelegated -> {
+                // Track delegations — used for observability, no state change needed
+            }
+
+            is AgentEvent.AgentCreated -> {
+                // Track agent creation — used for observability
+            }
+
+            is AgentEvent.MessageReceived -> {
+                // Inter-agent messages are ephemeral, no state change
+            }
         }
     }
 

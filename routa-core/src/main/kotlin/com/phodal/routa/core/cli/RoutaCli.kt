@@ -3,6 +3,9 @@ package com.phodal.routa.core.cli
 import com.phodal.routa.core.RoutaFactory
 import com.phodal.routa.core.config.RoutaConfigLoader
 import com.phodal.routa.core.coordinator.TaskSummary
+import com.phodal.routa.core.provider.AgentProvider
+import com.phodal.routa.core.provider.CapabilityBasedRouter
+import com.phodal.routa.core.provider.StreamChunk
 import com.phodal.routa.core.runner.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +19,16 @@ import kotlinx.coroutines.runBlocking
  * - LLM config for ROUTA (planning) and GATE (verification)
  * - ACP agent config for CRAFTER (real coding agents like Codex, Claude Code)
  *
+ * Uses [CapabilityBasedRouter] for dynamic provider selection:
+ * - Each provider declares its capabilities (file editing, terminal, tool calling, etc.)
+ * - The router automatically picks the best provider for each role
+ * - Crafters run in parallel when using AgentProvider
+ *
  * Usage:
  * ```bash
  * ./gradlew :routa-core:run
+ * ./gradlew :routa-core:run --args="--cwd /path/to/project"
+ * ./gradlew :routa-core:run --args="--crafter claude-code"
  * ```
  */
 fun main(args: Array<String>) {
@@ -78,14 +88,17 @@ fun main(args: Array<String>) {
         i++
     }
     println("  Working directory: $cwd")
-    println()
 
     // Create system
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Build the runner
-    val runner = buildRunner(scope, cwd, crafterOverride)
+    // Build the provider using capability-based routing
+    val provider = buildProvider(scope, cwd, crafterOverride)
 
+    // Print provider routing info
+    printProviderInfo(provider)
+
+    println()
     println("Enter your requirement (or 'quit' to exit):")
     println("─".repeat(50))
 
@@ -98,11 +111,14 @@ fun main(args: Array<String>) {
         if (input.isEmpty()) continue
 
         val routa = RoutaFactory.createInMemory(scope)
+        val workspaceId = "cli-${System.currentTimeMillis()}"
+
         val orchestrator = RoutaOrchestrator(
             routa = routa,
-            runner = runner,
-            workspaceId = "cli-${System.currentTimeMillis()}",
-            onPhaseChange = { phase -> printPhase(phase) }
+            runner = provider,
+            workspaceId = workspaceId,
+            onPhaseChange = { phase -> printPhase(phase) },
+            onStreamChunk = { agentId, chunk -> printStreamChunk(agentId, chunk) },
         )
 
         try {
@@ -110,6 +126,13 @@ fun main(args: Array<String>) {
                 orchestrator.execute(input)
             }
             printResult(result)
+
+            // Print event replay summary
+            val eventLog = runBlocking { routa.eventBus.getTimestampedLog() }
+            if (eventLog.isNotEmpty()) {
+                println()
+                println("📊 Event log: ${eventLog.size} critical events recorded")
+            }
         } catch (e: Exception) {
             println()
             println("✗ Error: ${e.message}")
@@ -119,20 +142,22 @@ fun main(args: Array<String>) {
         }
     }
 
+    // Shutdown provider resources
+    runBlocking { provider.shutdown() }
     println("\nGoodbye!")
 }
 
 /**
- * Build the appropriate runner based on config:
- * - Claude detected → CompositeAgentRunner (Koog for ROUTA, Claude for CRAFTER+GATE)
- * - Other ACP agent → CompositeAgentRunner (Koog for ROUTA, ACP for CRAFTER+GATE)
- * - No ACP → KoogAgentRunner for all roles
+ * Build an [AgentProvider] via [RoutaFactory.createProvider] with capability-based routing.
+ *
+ * This replaces the old [buildRunner] which used hardcoded CompositeAgentRunner.
+ * Now each provider declares its capabilities, and the [CapabilityBasedRouter]
+ * dynamically selects the best match for each role.
  */
-private fun buildRunner(scope: CoroutineScope, cwd: String, crafterOverride: String? = null): AgentRunner {
+private fun buildProvider(scope: CoroutineScope, cwd: String, crafterOverride: String? = null): AgentProvider {
     val routa = RoutaFactory.createInMemory(scope)
-    val koogRunner = KoogAgentRunner(routa.tools, "cli-workspace")
 
-    // If a specific crafter is requested, look it up
+    // Resolve ACP agent config
     val crafterInfo = if (crafterOverride != null) {
         val agents = RoutaConfigLoader.getAcpAgents()
         val agent = agents[crafterOverride]
@@ -140,31 +165,49 @@ private fun buildRunner(scope: CoroutineScope, cwd: String, crafterOverride: Str
     } else {
         RoutaConfigLoader.getActiveCrafterConfig()
     }
-    if (crafterInfo != null) {
-        val (agentKey, agentConfig) = crafterInfo
 
-        // Claude Code uses its own CLI protocol (not standard ACP)
-        val isClaudeCode = agentConfig.command.contains("claude")
-        if (isClaudeCode) {
-            val claudeRunner = ClaudeAgentRunner(
-                claudePath = agentConfig.command,
-                cwd = cwd,
-                onOutput = { text -> print(text) },
-            )
-            return CompositeAgentRunner(koogRunner = koogRunner, acpRunner = claudeRunner)
+    // Determine if the configured crafter is Claude Code
+    val isClaudeCode = crafterInfo?.second?.command?.contains("claude") == true
+
+    return RoutaFactory.createProvider(
+        system = routa,
+        workspaceId = "cli-workspace",
+        cwd = cwd,
+        acpConfig = if (!isClaudeCode) crafterInfo?.second else null,
+        acpAgentKey = if (!isClaudeCode) (crafterInfo?.first ?: "codex") else "codex",
+        claudePath = if (isClaudeCode) crafterInfo?.second?.command else null,
+        modelConfig = RoutaConfigLoader.getActiveModelConfig(),
+        resilient = true,
+    )
+}
+
+/**
+ * Print the provider routing table.
+ */
+private fun printProviderInfo(provider: AgentProvider) {
+    if (provider is CapabilityBasedRouter) {
+        println()
+        println("  Provider routing (capability-based):")
+        for (caps in provider.listProviders()) {
+            val features = mutableListOf<String>()
+            if (caps.supportsFileEditing) features.add("files")
+            if (caps.supportsTerminal) features.add("terminal")
+            if (caps.supportsToolCalling) features.add("tools")
+            if (caps.supportsStreaming) features.add("streaming")
+            if (caps.supportsInterrupt) features.add("interrupt")
+            println("    ${caps.name} [priority=${caps.priority}] → ${features.joinToString(", ")}")
         }
-
-        // Standard ACP agent
-        val acpRunner = AcpAgentRunner(
-            agentKey = agentKey,
-            config = agentConfig,
-            cwd = cwd,
-            onUpdate = { text -> print(text) },
-        )
-        return CompositeAgentRunner(koogRunner = koogRunner, acpRunner = acpRunner)
     }
+}
 
-    return koogRunner
+private fun printStreamChunk(agentId: String, chunk: StreamChunk) {
+    when (chunk) {
+        is StreamChunk.Text -> print(chunk.content)
+        is StreamChunk.ToolCall -> println("    [Tool: ${chunk.name} (${chunk.status})]")
+        is StreamChunk.Error -> println("    ⚠ ${chunk.message}")
+        is StreamChunk.Completed -> println("\n    [${chunk.stopReason}]")
+        is StreamChunk.Heartbeat -> { /* silent */ }
+    }
 }
 
 private fun printPhase(phase: OrchestratorPhase) {
