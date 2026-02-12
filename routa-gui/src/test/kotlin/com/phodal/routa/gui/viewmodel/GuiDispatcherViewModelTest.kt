@@ -58,7 +58,7 @@ class GuiDispatcherViewModelTest {
 
     @Test
     fun `initial state has ROUTA and GATE agents`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         val agents = guiVm.agents.value
         assertEquals("Should have 2 initial agents", 2, agents.size)
@@ -66,62 +66,68 @@ class GuiDispatcherViewModelTest {
         assertEquals("Second agent should be GATE", "__gate__", agents[1].id)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `initial selected agent is ROUTA`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         assertEquals("__routa__", guiVm.selectedAgentId.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `initial status text is Ready`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         assertEquals("Ready", guiVm.statusText.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `initial agent mode is ACP_AGENT`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         assertEquals(AgentMode.ACP_AGENT, guiVm.agentMode.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `initial agent outputs are empty`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         assertTrue(guiVm.agentOutputs.value.isEmpty())
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Agent Selection Tests ───────────────────────────────────────────
 
     @Test
     fun `selectAgent updates selectedAgentId`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.selectAgent("__gate__")
 
         assertEquals("__gate__", guiVm.selectedAgentId.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Mode Switching Tests ────────────────────────────────────────────
 
     @Test
     fun `setAgentMode updates mode and syncs with RoutaViewModel`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.setAgentMode(AgentMode.WORKSPACE)
 
@@ -129,35 +135,38 @@ class GuiDispatcherViewModelTest {
         assertEquals(AgentMode.WORKSPACE, routaVm.agentMode)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Phase Handling Tests ────────────────────────────────────────────
 
     @Test
     fun `handlePhaseChange updates status text for Planning`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.handlePhaseChange(OrchestratorPhase.Planning)
 
         assertEquals("ROUTA is planning...", guiVm.statusText.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `handlePhaseChange updates status text for Completed`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.handlePhaseChange(OrchestratorPhase.Completed)
 
         assertEquals("Completed", guiVm.statusText.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `handlePhaseChange updates ROUTA agent status on Planning`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.handlePhaseChange(OrchestratorPhase.Planning)
 
@@ -166,11 +175,12 @@ class GuiDispatcherViewModelTest {
         assertEquals(AgentStatus.ACTIVE, routaAgent!!.status)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `handlePhaseChange updates GATE agent status on VerificationStarting`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.handlePhaseChange(OrchestratorPhase.VerificationStarting(1))
 
@@ -179,13 +189,14 @@ class GuiDispatcherViewModelTest {
         assertEquals(AgentStatus.ACTIVE, gateAgent!!.status)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Output Accumulation Tests ───────────────────────────────────────
 
     @Test
     fun `appendChunkToOutput accumulates text chunks`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.appendChunkToOutput("__routa__", AgentRole.ROUTA, StreamChunk.Text("Hello "))
         guiVm.appendChunkToOutput("__routa__", AgentRole.ROUTA, StreamChunk.Text("World"))
@@ -195,11 +206,12 @@ class GuiDispatcherViewModelTest {
         assertEquals("Hello World", output!!.fullText)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `appendChunkToOutput handles tool call chunks`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.appendChunkToOutput(
             "__routa__", AgentRole.ROUTA,
@@ -211,22 +223,24 @@ class GuiDispatcherViewModelTest {
         assertTrue(output!!.fullText.contains("read_file"))
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `appendChunkToOutput ignores Completed chunks`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.appendChunkToOutput("__routa__", AgentRole.ROUTA, StreamChunk.Completed("done"))
 
         assertTrue(guiVm.agentOutputs.value.isEmpty())
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `appendChunkToOutput separates outputs per agent`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.appendChunkToOutput("__routa__", AgentRole.ROUTA, StreamChunk.Text("ROUTA output"))
         guiVm.appendChunkToOutput("__gate__", AgentRole.GATE, StreamChunk.Text("GATE output"))
@@ -237,13 +251,14 @@ class GuiDispatcherViewModelTest {
         assertEquals("GATE output", gateOutput?.fullText)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Reset Tests ─────────────────────────────────────────────────────
 
     @Test
     fun `reset clears outputs and restores initial state`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         // Simulate some state
         guiVm.appendChunkToOutput("__routa__", AgentRole.ROUTA, StreamChunk.Text("test"))
@@ -259,13 +274,14 @@ class GuiDispatcherViewModelTest {
         assertEquals(2, guiVm.agents.value.size)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Crafter State Handling Tests ─────────────────────────────────────
 
     @Test
     fun `handleCrafterStatesUpdate adds new CRAFTER entries before GATE`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         val crafterStates = mapOf(
             "task-1" to com.phodal.routa.core.viewmodel.CrafterStreamState(
@@ -296,11 +312,12 @@ class GuiDispatcherViewModelTest {
         assertTrue(crafterAgents.any { it.displayName == "Add Registration" })
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `handleCrafterStatesUpdate updates existing CRAFTER status`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         // First update: add CRAFTERs
         guiVm.handleCrafterStatesUpdate(mapOf(
@@ -323,13 +340,14 @@ class GuiDispatcherViewModelTest {
         assertEquals(AgentStatus.COMPLETED, guiVm.agents.value.find { it.id == "task-1" }?.status)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Error Handling Tests ────────────────────────────────────────────
 
     @Test
     fun `submitRequest emits error when not initialized`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
         val errors = mutableListOf<String>()
 
         // Collect errors in background
@@ -349,11 +367,12 @@ class GuiDispatcherViewModelTest {
         assertTrue("Should emit error, got: $errors", errors.any { it.contains("not initialized") })
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     @Test
     fun `submitRequest ignores blank input`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
 
         guiVm.submitRequest("")
         guiVm.submitRequest("   ")
@@ -361,19 +380,31 @@ class GuiDispatcherViewModelTest {
         assertEquals("Ready", guiVm.statusText.value)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Full Integration Test ───────────────────────────────────────────
 
     @Test
     fun `full flow - submit request updates agents and status`() {
-        val (guiVm, routaVm, _) = createViewModels()
+        val (guiVm, routaVm, scope) = createViewModels()
         routaVm.initialize(MockAgentProvider(), "test-workspace")
 
         guiVm.submitRequest("Add user authentication")
 
-        // Wait for async execution
-        runBlocking { delay(3000) }
+        // Wait for async execution with timeout and polling
+        runBlocking {
+            withTimeout(2000) {
+                while (true) {
+                    val status = guiVm.statusText.value
+                    val agentsSnapshot = guiVm.agents.value
+                    if ((status.contains("Completed") || status.contains("✅")) && agentsSnapshot.size > 2) {
+                        break
+                    }
+                    delay(50)
+                }
+            }
+        }
 
         // Status should indicate completion
         assertTrue(
@@ -386,6 +417,7 @@ class GuiDispatcherViewModelTest {
         assertTrue("Should have more than 2 agents", agents.size > 2)
 
         routaVm.dispose()
+        scope.cancel()
     }
 
     // ── Companion: Test Data ────────────────────────────────────────────

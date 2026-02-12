@@ -81,14 +81,14 @@ class GuiDispatcherPanel(
 
     private fun observeState() {
         // Observe agent list → update sidebar
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.agents.collectLatest { agents ->
                 sidebarPanel.updateAgents(agents)
             }
         }
 
         // Observe selected agent → update sidebar highlight + content
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.selectedAgentId.collectLatest { agentId ->
                 sidebarPanel.setSelected(agentId)
                 val agent = viewModel.agents.value.find { it.id == agentId }
@@ -98,7 +98,7 @@ class GuiDispatcherPanel(
         }
 
         // Observe agent outputs → update content for selected agent
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.agentOutputs.collectLatest { outputs ->
                 val selectedId = viewModel.selectedAgentId.value
                 val agent = viewModel.agents.value.find { it.id == selectedId }
@@ -108,21 +108,21 @@ class GuiDispatcherPanel(
         }
 
         // Observe status text → update status bar
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.statusText.collectLatest { text ->
                 statusLabel.text = text
             }
         }
 
         // Observe running state → toggle input buttons
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.routaViewModel.isRunning.collectLatest { running ->
                 inputPanel.setRunning(running)
             }
         }
 
         // Observe errors → show dialog
-        scope.launch(Dispatchers.Main) {
+        scope.launch(Dispatchers.Swing) {
             viewModel.errorMessage.collect { msg ->
                 JOptionPane.showMessageDialog(
                     this@GuiDispatcherPanel,

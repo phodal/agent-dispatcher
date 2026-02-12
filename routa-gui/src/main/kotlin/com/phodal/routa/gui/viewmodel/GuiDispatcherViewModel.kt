@@ -176,6 +176,7 @@ class GuiDispatcherViewModel(
         // Clear previous state
         clearOutputs()
         rebuildAgentList()
+        _selectedAgentId.value = "__routa__"  // Reset selection to default
         _statusText.value = "Starting..."
 
         // Apply mode
@@ -200,6 +201,14 @@ class GuiDispatcherViewModel(
             routaViewModel.stopExecution()
             _statusText.value = "Stopped"
         }
+    }
+
+    /**
+     * Dispose of resources and cancel ongoing coroutines.
+     * Should be called when the ViewModel is no longer needed.
+     */
+    fun dispose() {
+        routaViewModel.dispose()
     }
 
     /**
@@ -333,11 +342,15 @@ class GuiDispatcherViewModel(
                 }
             }
             is OrchestratorPhase.CrafterRunning -> {
+                // Ensure entry exists before updating
+                ensureAgentEntry(currentAgents, phase.taskId, AgentRole.CRAFTER)
                 updateAgentEntry(currentAgents, phase.taskId) {
                     it.copy(status = AgentStatus.ACTIVE)
                 }
             }
             is OrchestratorPhase.CrafterCompleted -> {
+                // Ensure entry exists before updating
+                ensureAgentEntry(currentAgents, phase.taskId, AgentRole.CRAFTER)
                 updateAgentEntry(currentAgents, phase.taskId) {
                     it.copy(status = AgentStatus.COMPLETED)
                 }
@@ -353,9 +366,10 @@ class GuiDispatcherViewModel(
                 }
             }
             is OrchestratorPhase.Completed -> {
-                // Mark all as completed
+                // Mark all as completed, but preserve CANCELLED and ERROR states
                 for (i in currentAgents.indices) {
-                    if (currentAgents[i].status != AgentStatus.ERROR) {
+                    if (currentAgents[i].status != AgentStatus.ERROR && 
+                        currentAgents[i].status != AgentStatus.CANCELLED) {
                         currentAgents[i] = currentAgents[i].copy(status = AgentStatus.COMPLETED)
                     }
                 }
@@ -374,6 +388,21 @@ class GuiDispatcherViewModel(
         val index = agents.indexOfFirst { it.id == agentId }
         if (index >= 0) {
             agents[index] = transform(agents[index])
+        }
+    }
+
+    private fun ensureAgentEntry(
+        agents: MutableList<AgentEntry>,
+        agentId: String,
+        role: AgentRole,
+    ) {
+        if (agents.none { it.id == agentId }) {
+            agents.add(AgentEntry(
+                id = agentId,
+                role = role,
+                displayName = agentId,
+                status = AgentStatus.PENDING
+            ))
         }
     }
 
