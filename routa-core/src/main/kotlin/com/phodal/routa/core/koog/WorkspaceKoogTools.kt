@@ -1,6 +1,7 @@
 package com.phodal.routa.core.koog
 
 import ai.koog.agents.core.tools.SimpleTool
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.nio.file.Files
@@ -28,6 +29,7 @@ import java.nio.file.Paths
 
 @Serializable
 data class ReadFileArgs(
+    @property:LLMDescription("Relative path to the file from workspace root, e.g. 'src/main.kt' or 'package.json'. REQUIRED.")
     val path: String,
 )
 
@@ -62,7 +64,9 @@ class ReadFileTool(
 
 @Serializable
 data class WriteFileArgs(
+    @property:LLMDescription("Relative path to the file from workspace root, e.g. 'src/main.kt'. REQUIRED.")
     val path: String,
+    @property:LLMDescription("The content to write to the file. REQUIRED.")
     val content: String,
 )
 
@@ -101,6 +105,7 @@ class WriteFileTool(
 
 @Serializable
 data class ListFilesArgs(
+    @property:LLMDescription("Relative path to the directory from workspace root. Defaults to '.' (root). Optional.")
     val path: String = ".",
 )
 

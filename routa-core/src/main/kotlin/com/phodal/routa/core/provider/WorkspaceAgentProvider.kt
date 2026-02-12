@@ -9,10 +9,13 @@ import com.phodal.routa.core.config.RoutaConfigLoader
 import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
+import com.phodal.routa.core.koog.ListFilesTool
+import com.phodal.routa.core.koog.ReadFileTool
 import com.phodal.routa.core.koog.RoutaAgentFactory
 import com.phodal.routa.core.koog.TextBasedToolExecutor
 import com.phodal.routa.core.koog.ToolCallExtractor
 import com.phodal.routa.core.koog.ToolCallStreamFilter
+import com.phodal.routa.core.koog.ToolSchemaGenerator
 import kotlinx.coroutines.flow.cancellable
 import java.util.concurrent.ConcurrentHashMap
 
@@ -95,8 +98,20 @@ class WorkspaceAgentProvider(
          * - It does NOT implement code directly
          * - It has read-only file access for understanding the codebase
          * - Implementation is delegated to Implementor agents via @@@task blocks
+         *
+         * Tool schemas are auto-generated from [ReadFileTool] and [ListFilesTool]
+         * using [ToolSchemaGenerator], ensuring the prompt stays in sync with
+         * the actual tool implementations.
          */
-        fun buildSystemPrompt(cwd: String): String = """
+        fun buildSystemPrompt(cwd: String): String {
+            // Auto-generate tool schema from Koog tool definitions
+            val tools = listOf(
+                ReadFileTool(cwd),
+                ListFilesTool(cwd),
+            )
+            val toolsSchema = ToolSchemaGenerator.generateToolsSchema(tools)
+
+            return """
             |## Workspace Coordinator
             |
             |You plan, delegate, and verify. You do NOT implement code yourself. You NEVER edit files directly.
@@ -165,49 +180,11 @@ class WorkspaceAgentProvider(
             |- Content below = task body
             |- Auto-converts to Task Note when saved
             |
-            |## Available Tools (READ-ONLY)
-            |
-            |You have the following tools available for **reading and exploring** the codebase.
-            |To use a tool, emit a `<tool_call>` block with a JSON object containing `name` and `arguments`.
-            |
-            |**CRITICAL**: Always include ALL required parameters. NEVER emit empty arguments `{}`.
-            |
-            |---
-            |
-            |### read_file
-            |
-            |Read the contents of a file in the workspace.
-            |
-            |**Parameters:**
-            |- `path` (string, REQUIRED): File path relative to workspace root
-            |
-            |**Example:**
-            |<tool_call>
-            |{"name": "read_file", "arguments": {"path": "README.md"}}
-            |</tool_call>
-            |
-            |**WRONG (will fail):**
-            |<tool_call>
-            |{"name": "read_file", "arguments": {}}
-            |</tool_call>
-            |
-            |---
-            |
-            |### list_files
-            |
-            |List files and directories in a path.
-            |
-            |**Parameters:**
-            |- `path` (string, optional, default: "."): Directory path relative to workspace root
-            |
-            |**Example:**
-            |<tool_call>
-            |{"name": "list_files", "arguments": {"path": "src"}}
-            |</tool_call>
-            |
-            |---
+            |$toolsSchema
             |
             |## Tool Call Format
+            |
+            |To use a tool, emit a `<tool_call>` block with a JSON object containing `name` and `arguments`:
             |
             |```
             |<tool_call>
@@ -215,11 +192,18 @@ class WorkspaceAgentProvider(
             |</tool_call>
             |```
             |
-            |**Rules:**
-            |1. **ALWAYS include required parameters** — `read_file` REQUIRES `path`
+            |**CRITICAL Rules:**
+            |1. **ALWAYS include required parameters** — `read_file` REQUIRES `path`. NEVER emit empty arguments `{}`.
             |2. **JSON format** — Content inside `<tool_call>` must be valid JSON
             |3. **One tool per block** — Each `<tool_call>` block contains one tool invocation
             |4. **Wait for results** — After emitting tool calls, wait for `<tool_result>` responses
+            |
+            |**WRONG (will fail):**
+            |```xml
+            |<tool_call>
+            |{"name": "read_file", "arguments": {}}
+            |</tool_call>
+            |```
             |
             |## Important Reminders
             |
@@ -228,6 +212,7 @@ class WorkspaceAgentProvider(
             |- Keep the Spec up to date — update it when plans change or decisions are made.
             |- When you're done planning, present the spec and STOP. Wait for user approval.
         """.trimMargin()
+        }
     }
 
     // ── AgentProvider: Run (with tool call loop) ────────────────────────
