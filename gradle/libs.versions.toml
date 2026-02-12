@@ -11,7 +11,7 @@ kotlinxIo = "0.6.0"
 kotlinxDatetime = "0.6.2"
 snakeyaml = "2.5"
 kaml = "0.67.0"
-slf4j = "2.0.16"
+slf4j = "2.0.17"
 ktor = "3.1.0"
 
 # plugins
