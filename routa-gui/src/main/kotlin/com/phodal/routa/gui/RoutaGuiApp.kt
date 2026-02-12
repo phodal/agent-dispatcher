@@ -35,7 +35,7 @@ fun main() {
     }
 
     SwingUtilities.invokeLater {
-        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        val scope = CoroutineScope(Dispatchers.Swing + SupervisorJob())
         val routaViewModel = RoutaViewModel(scope)
         val guiViewModel = GuiDispatcherViewModel(routaViewModel, scope)
 
