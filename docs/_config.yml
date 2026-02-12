@@ -2,8 +2,8 @@
 # Using Just the Docs theme - https://just-the-docs.github.io/just-the-docs/
 
 # Site settings
-title: Routa
-description: Multi-Agent Development Environment for IntelliJ IDEA
+title: Routa - Multi-Agent Development Environment
+description: Routa provides multi-agent session management, real-time streaming chat interface, tool call visualization, and efficient process lifecycle management. Supports Claude Code, Codex CLI, Gemini CLI, and any ACP-compatible agents.
 baseurl: "/"
 url: "https://routa.phodal.com"
 
