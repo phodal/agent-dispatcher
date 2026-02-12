@@ -3,6 +3,7 @@ package com.phodal.routa.hub.mcp
 import com.phodal.routa.core.RoutaFactory
 import com.phodal.routa.core.RoutaSystem
 import com.phodal.routa.core.model.AgentRole
+import com.phodal.routa.core.model.Task
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
+import java.time.Instant
 
 /**
  * Tests for the Routa Agent Hub MCP server and tool manager.
@@ -103,13 +105,13 @@ class AgentHubMcpToolManagerTest {
         val routaId = routa.coordinator.initialize("test-workspace")
 
         // Create a task
-        val task = com.phodal.routa.core.model.Task(
+        val task = Task(
             id = "hub-test-task",
             title = "Hub Test Task",
             objective = "Test agent hub",
             workspaceId = "test-workspace",
-            createdAt = java.time.Instant.now().toString(),
-            updatedAt = java.time.Instant.now().toString(),
+            createdAt = Instant.now().toString(),
+            updatedAt = Instant.now().toString(),
         )
         routa.context.taskStore.save(task)
 
@@ -142,14 +144,14 @@ class AgentHubMcpToolManagerTest {
             .jsonObject["id"]!!.jsonPrimitive.content
 
         // Create a task assigned to the crafter
-        val task = com.phodal.routa.core.model.Task(
+        val task = Task(
             id = "hub-msg-task",
             title = "Hub Message Task",
             objective = "Test messaging",
             assignedTo = crafterId,
             workspaceId = "test-workspace",
-            createdAt = java.time.Instant.now().toString(),
-            updatedAt = java.time.Instant.now().toString(),
+            createdAt = Instant.now().toString(),
+            updatedAt = Instant.now().toString(),
         )
         routa.context.taskStore.save(task)
 

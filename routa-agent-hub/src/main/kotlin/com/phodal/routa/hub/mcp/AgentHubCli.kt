@@ -37,7 +37,7 @@ import kotlinx.io.buffered
 fun main() {
     val workspaceId = System.getenv("ROUTA_WORKSPACE_ID") ?: "default"
 
-    val (mcpServer, _) = AgentHubMcpServer.create(workspaceId)
+    val (mcpServer, routa) = AgentHubMcpServer.create(workspaceId)
 
     val transport = StdioServerTransport(
         inputStream = System.`in`.asSource().buffered(),
@@ -52,4 +52,6 @@ fun main() {
         session.onClose { done.complete(Unit) }
         done.await()
     }
+
+    routa.coordinator.shutdown()
 }
