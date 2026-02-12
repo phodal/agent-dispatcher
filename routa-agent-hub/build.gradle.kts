@@ -34,11 +34,15 @@ dependencies {
     // MCP SDK for tool exposure
     implementation(libs.mcp.sdk)
 
-    // Ktor for MCP WebSocket/SSE server
+    // Ktor for MCP WebSocket/SSE server and A2A HTTP endpoints
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.server.sse)
+
+    // Ktor HTTP client for A2A protocol client
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
 
     // Logging
     runtimeOnly(libs.slf4j.simple)

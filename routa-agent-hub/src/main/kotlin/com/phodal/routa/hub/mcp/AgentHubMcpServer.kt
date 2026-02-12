@@ -2,6 +2,8 @@ package com.phodal.routa.hub.mcp
 
 import com.phodal.routa.core.RoutaFactory
 import com.phodal.routa.core.RoutaSystem
+import com.phodal.routa.hub.a2a.A2AServer
+import com.phodal.routa.hub.a2a.A2AToolManager
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.types.*
@@ -19,6 +21,14 @@ import kotlinx.coroutines.SupervisorJob
  * agent management operations and can be used independently by any MCP client
  * (Cursor, Claude, VS Code, etc.).
  *
+ * In addition to the core agent management tools, this server also exposes
+ * [A2A (Agent-to-Agent) protocol](https://a2a-protocol.org/) tools for
+ * cross-system agent interoperability. The A2A integration allows:
+ * - Discovering remote A2A agents and their capabilities
+ * - Sending messages to remote A2A agents
+ * - Managing A2A tasks (query status, cancel)
+ * - Exposing this hub's agents via the A2A protocol
+ *
  * Usage:
  * ```kotlin
  * val mcpServer = AgentHubMcpServer.create("my-workspace")
@@ -28,15 +38,17 @@ import kotlinx.coroutines.SupervisorJob
 object AgentHubMcpServer {
 
     /**
-     * Create an MCP Server with agent management tools registered.
+     * Create an MCP Server with agent management tools and A2A protocol tools registered.
      *
      * @param workspaceId The workspace ID for the agent management session.
      * @param routa Optional pre-configured RoutaSystem (creates in-memory if null).
+     * @param a2aBaseUrl The base URL for the A2A server (for agent card generation). Defaults to null (A2A server not started).
      * @return A pair of (Server, RoutaSystem).
      */
     fun create(
         workspaceId: String,
         routa: RoutaSystem? = null,
+        a2aBaseUrl: String? = null,
     ): Pair<Server, RoutaSystem> {
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
         val system = routa ?: RoutaFactory.createInMemory(scope)
@@ -55,6 +67,10 @@ object AgentHubMcpServer {
 
         // Register agent management tools
         AgentHubToolManager(system.tools, workspaceId).registerTools(server)
+
+        // Register A2A protocol tools
+        val a2aServer = a2aBaseUrl?.let { A2AServer(system, workspaceId, it) }
+        A2AToolManager(a2aServer).registerTools(server)
 
         return server to system
     }
